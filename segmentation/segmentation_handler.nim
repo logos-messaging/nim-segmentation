@@ -41,9 +41,9 @@ type SegmentationHandler* = ref object
 proc new*(
     T: type SegmentationHandler,
     config: SegmentationConfig,
-    onSetDropped: SegmentSetDroppedHandler = nil,
-    onSegmentDiscarded: SegmentDiscardedHandler = nil,
-    onPayloadReassembled: PayloadReassembledHandler = nil,
+    onSetDropped: SegmentSetDroppedHandler,
+    onSegmentDiscarded: SegmentDiscardedHandler,
+    onPayloadReassembled: PayloadReassembledHandler,
 ): Result[T, string] =
   ## Validate `config` and derive the chunk size from it. Fails rather than
   ## clamping, so a misconfiguration surfaces at construction and not on the
@@ -51,9 +51,13 @@ proc new*(
   ##
   ## The callbacks report every reception outcome: `onPayloadReassembled` when a
   ## payload completes, `onSetDropped` once per abandoned payload, and
-  ## `onSegmentDiscarded` per rejected segment. All default to `nil`, which
-  ## disables them, and all are fixed at construction, so a handler is never
-  ## half-wired.
+  ## `onSegmentDiscarded` per rejected segment.
+  ##
+  ## All three are required and must be non-nil. Reception discards far more than
+  ## it delivers, and a set that expires, is evicted or fails its hash check has
+  ## no other channel -- so a consumer that had not wired `onSetDropped` would
+  ## lose payloads silently. Deciding to ignore an outcome is fine; it just has
+  ## to be a decision, written as an explicit no-op rather than an omission.
   ##
   ## `onPayloadReassembled` carries the same payload the call returns; use one or
   ## the other, not both.
@@ -77,6 +81,12 @@ proc new*(
       "segmentation_handler.new: maxTotalSegments out of range: " &
         $config.maxTotalSegments & " not in [1, " & $MaxSupportedTotalSegments & "]"
     )
+  if onSetDropped.isNil():
+    return err("segmentation_handler.new: onSetDropped must not be nil")
+  if onSegmentDiscarded.isNil():
+    return err("segmentation_handler.new: onSegmentDiscarded must not be nil")
+  if onPayloadReassembled.isNil():
+    return err("segmentation_handler.new: onPayloadReassembled must not be nil")
   if config.maxSegmentSets < 1:
     return err(
       "segmentation_handler.new: maxSegmentSets not positive: " & $config.maxSegmentSets
@@ -112,15 +122,14 @@ func pendingSets*(self: SegmentationHandler): int =
   ## Segment sets currently held incomplete. Mainly for tests and metrics.
   return self.cache.len
 
+# `new` rejects nil callbacks, so these need no guard.
 proc notifyDiscarded(self: SegmentationHandler, reason: SegmentDiscardReason) =
-  if not self.onSegmentDiscarded.isNil():
-    self.onSegmentDiscarded(reason)
+  self.onSegmentDiscarded(reason)
 
 proc notifySetDropped(
     self: SegmentationHandler, s: SegmentSet, reason: SegmentSetDropReason
 ) =
-  if not self.onSetDropped.isNil():
-    self.onSetDropped(s.originalPayloadHash, reason)
+  self.onSetDropped(s.originalPayloadHash, reason)
 
 proc performSegmentation*(
     self: SegmentationHandler, payload: seq[byte]
@@ -242,8 +251,7 @@ proc handleIncomingSegment*(
   let reassembled = ReassembledPayload.init(
     payload = payload, originalPayloadHash = m.originalPayloadHash
   )
-  if not self.onPayloadReassembled.isNil():
-    self.onPayloadReassembled(reassembled)
+  self.onPayloadReassembled(reassembled)
   return ok(Opt.some(reassembled))
 
 proc cleanupSegments*(self: SegmentationHandler) =

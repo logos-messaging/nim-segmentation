@@ -55,12 +55,26 @@ let handler = SegmentationHandler.new(
 ).expect("valid config")
 ```
 
+All three are **required** — `new` fails on a nil callback. Reception discards far more
+than it delivers, and an expired, evicted or hash-failing set has no other channel, so an
+unwired `onSetDropped` loses payloads silently. Ignoring an outcome is fine, it just has
+to be an explicit no-op rather than an omission:
+
+```nim
+proc ignoreDropped(hash: seq[byte], reason: SegmentSetDropReason) {.gcsafe, raises: [].} =
+  discard
+```
+
+The callbacks are `{.gcsafe.}`, so they may close over locals or a context object but not
+over mutable module-level globals. See [tools/roundtrip_demo.nim](tools/roundtrip_demo.nim)
+for a complete working example.
+
 `onPayloadReassembled` fires immediately before `handleIncomingSegment` returns the same
 payload. They are one event reported twice: wire the callback and the returned `Opt` can
 be ignored, which makes reception uniformly event-driven. Acting on both delivers every
 payload twice.
 
-All default to `nil`. The library deliberately has no event system of its own: a drop
+The library deliberately has no event system of its own: a drop
 here knows a payload hash and nothing more, while the caller knows the channel and the
 sender, so it is better placed to raise the event.
 

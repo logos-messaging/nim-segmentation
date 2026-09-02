@@ -1,6 +1,17 @@
-import std/[algorithm, os, random, sequtils, times]
+import std/[algorithm, os, random, sequtils, strutils, times]
 import unittest2, results
 import segmentation, segmentation/segment_cache
+
+proc ignorePayload(p: ReassembledPayload) {.gcsafe, raises: [].} =
+  discard
+
+proc ignoreDropped(
+    hash: seq[byte], reason: SegmentSetDropReason
+) {.gcsafe, raises: [].} =
+  discard
+
+proc ignoreDiscarded(reason: SegmentDiscardReason) {.gcsafe, raises: [].} =
+  discard
 
 proc mkHandler(
     segmentSizeBytes = 256, parityRate = 0.0, maxTotalSegments = 256
@@ -11,7 +22,10 @@ proc mkHandler(
         segmentSizeBytes = segmentSizeBytes,
         parityRate = parityRate,
         maxTotalSegments = maxTotalSegments,
-      )
+      ),
+      onSetDropped = ignoreDropped,
+      onSegmentDiscarded = ignoreDiscarded,
+      onPayloadReassembled = ignorePayload,
     )
     .expect("valid config")
 
@@ -32,7 +46,9 @@ proc feed(h: SegmentationHandler, segments: seq[seq[byte]]): Opt[ReassembledPayl
 
 suite "configuration":
   test "defaults are accepted":
-    check SegmentationHandler.new(SegmentationConfig.init()).isOk()
+    check SegmentationHandler
+      .new(SegmentationConfig.init(), ignoreDropped, ignoreDiscarded, ignorePayload)
+      .isOk()
 
   test "chunk size is aligned and leaves room for the header":
     let h = mkHandler(segmentSizeBytes = 102_400)
@@ -40,13 +56,71 @@ suite "configuration":
     check h.chunkSize mod 64 == 0
 
   test "invalid configuration is rejected":
-    check SegmentationHandler.new(SegmentationConfig.init(segmentSizeBytes = 127)).isErr()
-    check SegmentationHandler.new(SegmentationConfig.init(parityRate = 1.0)).isErr()
-    check SegmentationHandler.new(SegmentationConfig.init(parityRate = -0.1)).isErr()
     check SegmentationHandler
-      .new(SegmentationConfig.init(reconstructionTimeoutSeconds = 0))
+      .new(
+        SegmentationConfig.init(segmentSizeBytes = 127),
+        ignoreDropped,
+        ignoreDiscarded,
+        ignorePayload,
+      )
       .isErr()
-    check SegmentationHandler.new(SegmentationConfig.init(maxTotalSegments = 0)).isErr()
+    check SegmentationHandler
+      .new(
+        SegmentationConfig.init(parityRate = 1.0),
+        ignoreDropped,
+        ignoreDiscarded,
+        ignorePayload,
+      )
+      .isErr()
+    check SegmentationHandler
+      .new(
+        SegmentationConfig.init(parityRate = -0.1),
+        ignoreDropped,
+        ignoreDiscarded,
+        ignorePayload,
+      )
+      .isErr()
+    check SegmentationHandler
+      .new(
+        SegmentationConfig.init(reconstructionTimeoutSeconds = 0),
+        ignoreDropped,
+        ignoreDiscarded,
+        ignorePayload,
+      )
+      .isErr()
+    check SegmentationHandler
+      .new(
+        SegmentationConfig.init(maxTotalSegments = 0),
+        ignoreDropped,
+        ignoreDiscarded,
+        ignorePayload,
+      )
+      .isErr()
+
+suite "callbacks are mandatory":
+  test "a nil callback is rejected at construction":
+    # Ignoring an outcome must be a decision written as an explicit no-op, not an
+    # omission -- otherwise a consumer loses dropped payloads silently.
+    check SegmentationHandler
+      .new(SegmentationConfig.init(), nil, ignoreDiscarded, ignorePayload)
+      .isErr()
+    check SegmentationHandler
+      .new(SegmentationConfig.init(), ignoreDropped, nil, ignorePayload)
+      .isErr()
+    check SegmentationHandler
+      .new(SegmentationConfig.init(), ignoreDropped, ignoreDiscarded, nil)
+      .isErr()
+
+  test "the error names the missing callback":
+    let e = SegmentationHandler.new(
+      SegmentationConfig.init(), nil, ignoreDiscarded, ignorePayload
+    ).error
+    check e.contains("onSetDropped")
+
+  test "explicit no-ops are accepted":
+    check SegmentationHandler
+      .new(SegmentationConfig.init(), ignoreDropped, ignoreDiscarded, ignorePayload)
+      .isOk()
 
 suite "segmentation without parity":
   test "a payload that fits one chunk is still wrapped":
@@ -368,6 +442,7 @@ suite "reception events":
           dropped[].add((hash, reason)),
         onSegmentDiscarded = proc(reason: SegmentDiscardReason) {.gcsafe.} =
           discarded[].add(reason),
+        onPayloadReassembled = ignorePayload,
       )
       .expect("valid config")
 
@@ -439,6 +514,8 @@ suite "reception events":
         SegmentationConfig.init(segmentSizeBytes = 256, maxSegmentSets = 1),
         onSetDropped = proc(hash: seq[byte], reason: SegmentSetDropReason) {.gcsafe.} =
           dropped[].add((hash, reason)),
+        onSegmentDiscarded = ignoreDiscarded,
+        onPayloadReassembled = ignorePayload,
       )
       .expect("valid config")
 
@@ -498,6 +575,8 @@ suite "reception events":
     let h = SegmentationHandler
       .new(
         SegmentationConfig.init(segmentSizeBytes = 256),
+        onSetDropped = ignoreDropped,
+        onSegmentDiscarded = ignoreDiscarded,
         onPayloadReassembled = proc(p: ReassembledPayload) {.gcsafe.} =
           reassembled[].add(p),
       )
@@ -516,6 +595,8 @@ suite "reception events":
     let h = SegmentationHandler
       .new(
         SegmentationConfig.init(segmentSizeBytes = 256),
+        onSetDropped = ignoreDropped,
+        onSegmentDiscarded = ignoreDiscarded,
         onPayloadReassembled = proc(p: ReassembledPayload) {.gcsafe.} =
           reassembled[].add(p),
       )
@@ -532,6 +613,7 @@ suite "reception events":
         SegmentationConfig.init(segmentSizeBytes = 256),
         onSetDropped = proc(hash: seq[byte], reason: SegmentSetDropReason) {.gcsafe.} =
           dropped[].add((hash, reason)),
+        onSegmentDiscarded = ignoreDiscarded,
         onPayloadReassembled = proc(p: ReassembledPayload) {.gcsafe.} =
           reassembled[].add(p),
       )

@@ -28,9 +28,9 @@
 ##                         reconstructionTimeoutSeconds,
 ##                         maxTotalSegments, maxSegmentSets): SegmentationConfig
 ## SegmentationHandler.new(config,
-##                          onSetDropped = nil,
-##                          onSegmentDiscarded = nil,
-##                          onPayloadReassembled = nil): Result[SegmentationHandler, string]
+##                          onSetDropped,
+##                          onSegmentDiscarded,
+##                          onPayloadReassembled): Result[SegmentationHandler, string]
 ## ```
 ##
 ## **Sending**
@@ -55,7 +55,11 @@
 ## onSegmentDiscarded(reason)                  # Undecodable, Invalid, Oversized,
 ##                                             # Duplicate, CountMismatch
 ## ```
-## A dropped set means that payload will never be delivered. All default to `nil`.
+## All three are required, and `new` fails on a nil one. Reception discards far
+## more than it delivers, and an expired, evicted or hash-failing set has no
+## other channel -- so an unwired `onSetDropped` would lose payloads silently.
+## Choosing to ignore an outcome is fine; it just has to be written as an
+## explicit no-op rather than left out.
 ##
 ## `onPayloadReassembled` fires immediately before the same payload is returned:
 ## they are one event reported twice, so act on the callback or on the returned
