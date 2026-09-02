@@ -21,7 +21,7 @@
 import results, protobuf_serialization
 import ./segment_message_pb
 
-export results, segment_message_pb
+export results
 
 const SegmentHashLen* = 32
   ## Keccak256 digest length, the only accepted `originalPayloadHash` length.
@@ -54,7 +54,7 @@ func init*(
     segmentPayload: segmentPayload,
   )
 
-func init*(T: type SegmentMessage, pb: SegmentMessagePB): T =
+func init(T: type SegmentMessage, pb: SegmentMessagePB): T =
   ## Narrow the mirror's widened counts back to the spec's `uint32`.
   ##
   ## Clamp rather than convert: the narrowing would wrap, and a wrapped count can
@@ -69,7 +69,7 @@ func init*(T: type SegmentMessage, pb: SegmentMessagePB): T =
     segmentPayload = pb.segmentPayload,
   )
 
-func toPB*(self: SegmentMessage): SegmentMessagePB =
+func toPB(self: SegmentMessage): SegmentMessagePB =
   return SegmentMessagePB.init(
     originalPayloadHash = self.originalPayloadHash,
     originalPayloadLength = self.originalPayloadLength,

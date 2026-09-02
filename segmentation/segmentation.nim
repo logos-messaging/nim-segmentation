@@ -8,7 +8,6 @@
 ## public surface gathered from the modules below. One type per module:
 ##
 ## - `segment_message`      -- `SegmentMessage`, the wire unit, and its validity rules
-## - `segment_message_pb`   -- `SegmentMessagePB`, the proto3 mirror (type only)
 ## - `segment_set`          -- `SegmentSet`, a payload's segments and its reassembly
 ## - `segment_cache`        -- `SegmentCache`, the set store: dedup, bounds, expiry
 ## - `reassembled_payload`    -- `ReassembledPayload`, a reconstructed payload
@@ -20,10 +19,7 @@
 import
   ./segmentation_handler,
   ./segment_message,
-  ./segment_message_pb,
   ./segmentation_config,
   ./reassembled_payload
 
-export
-  segmentation_handler, segment_message, segment_message_pb, segmentation_config,
-  reassembled_payload
+export segmentation_handler, segment_message, segmentation_config, reassembled_payload
