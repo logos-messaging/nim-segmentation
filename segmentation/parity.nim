@@ -17,6 +17,10 @@ import leopard
 
 const ShardAlignment* = 64 ## leopard rejects a `bufSize` that is not a multiple of 64.
 
+const
+  ShardClassData = "data"
+  ShardClassParity = "parity"
+
 func alignShardLen*(n: int): int =
   ## Largest multiple of `ShardAlignment` that is at most `n`. Rounding down can
   ## only shrink a segment, so it can never push one past `segmentSizeBytes`.
@@ -94,8 +98,8 @@ proc decodeParity*(
   ## with holes -- an empty seq marks a missing shard -- never compacted, so
   ## index `i` always refers to shard `i`. Returns every data shard at exactly
   ## `shardLen` bytes.
-  ?checkShards(dataShards, shardLen, "data")
-  ?checkShards(parityShards, shardLen, "parity")
+  ?checkShards(dataShards, shardLen, ShardClassData)
+  ?checkShards(parityShards, shardLen, ShardClassParity)
 
   # leopard takes its inputs as `var openArray`, so the caller's shards are
   # copied into locals it can bind to. `recovered` must be pre-sized: decode
