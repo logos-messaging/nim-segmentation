@@ -12,16 +12,10 @@
 ## }
 ## ```
 ##
-## The domain type is a plain object with non-`Opt` fields; a `{.proto3.}` mirror
-## carries the field annotations and a trivial conversion bridges the two, as
-## nim-sds does for `SdsMessage`. The mirror's integers are `uint64` even where
-## the spec says `uint32`: the varint is byte-identical below 2^32, and widening
-## means an out-of-range value from a peer is range-checked by `isValid` rather
-## than silently truncated at decode time.
-##
 ## proto3 omits default values, so `index`, `is_parity`, `original_payload_length`
-## and an empty `segment_payload` all legitimately arrive absent. Every `Opt.none`
-## maps to the proto3 default; absence is never an error in itself.
+## and an empty `segment_payload` all legitimately arrive absent. Treating any of
+## them as missing rather than as the default would reject the first segment of
+## every message from a conforming peer.
 
 {.push raises: [].}
 
@@ -43,6 +37,8 @@ type
     isParity*: bool
     segmentPayload*: seq[byte]
 
+  # `uint64` where the spec says `uint32`: the varint is byte-identical below
+  # 2^32, so this stays wire-compatible while keeping out-of-range values.
   SegmentMessagePB {.proto3.} = object
     originalPayloadHash {.fieldNumber: 1.}: Opt[seq[byte]]
     originalPayloadLength {.fieldNumber: 2, pint.}: Opt[uint64]
@@ -74,8 +70,8 @@ func toPB(m: SegmentMessage): SegmentMessagePB =
   )
 
 func fromPB(pb: SegmentMessagePB): SegmentMessage =
-  # Saturate rather than wrap: a count above 2^32 is out of range for the spec's
-  # uint32 fields, and `isValid` rejects it against maxTotalSegments anyway.
+  # Saturate rather than wrap: `uint32(2^32 + 5)` is 5, which would pass
+  # `isValid`; clamping to uint32.high keeps it out of range so it is rejected.
   let idx = pb.index.valueOr(0'u64)
   let count = pb.segmentCount.valueOr(0'u64)
   return SegmentMessage(
