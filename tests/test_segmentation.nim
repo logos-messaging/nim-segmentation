@@ -348,7 +348,7 @@ suite "segment cache bounds and expiry":
     )
 
   test "a set idle past the timeout is dropped":
-    let cache = SegmentCache.new(10, initDuration(seconds = 30))
+    let cache = SegmentCache.new(10, 1024 * 1024, initDuration(seconds = 30))
     let start = getMonoTime()
     discard cache.add(segmentFor(1, 0, 4), 256, start)
     check cache.len == 1
@@ -359,7 +359,7 @@ suite "segment cache bounds and expiry":
     check cache.len == 0
 
   test "a duplicate does not extend a set's life":
-    let cache = SegmentCache.new(10, initDuration(seconds = 30))
+    let cache = SegmentCache.new(10, 1024 * 1024, initDuration(seconds = 30))
     let start = getMonoTime()
     discard cache.add(segmentFor(1, 0, 4), 256, start)
 
@@ -370,7 +370,7 @@ suite "segment cache bounds and expiry":
     check cache.len == 0
 
   test "the least recently updated set is evicted first":
-    let cache = SegmentCache.new(2, initDuration(seconds = 300))
+    let cache = SegmentCache.new(2, 1024 * 1024, initDuration(seconds = 300))
     let start = getMonoTime()
     discard cache.add(segmentFor(1, 0, 4), 256, start)
     discard cache.add(segmentFor(2, 0, 4), 256, start + initDuration(seconds = 1))
@@ -382,7 +382,7 @@ suite "segment cache bounds and expiry":
     check not cache.get(segmentSetKey(segmentFor(3, 0, 4))).isNil()
 
   test "a set whose two classes exceed maxTotalSegments is dropped":
-    let cache = SegmentCache.new(10, initDuration(seconds = 300))
+    let cache = SegmentCache.new(10, 1024 * 1024, initDuration(seconds = 300))
     let now = getMonoTime()
     discard cache.add(segmentFor(1, 0, 4), 6, now)
     check cache.len == 1
@@ -628,3 +628,84 @@ suite "reception events":
     check reassembled[].len == 0
     check dropped[].len == 1
     check dropped[][0][1] == SegmentSetDropReason.HashMismatch
+
+suite "buffered-byte bound":
+  test "bytes are tracked as segments arrive and released on delivery":
+    let h = mkHandler()
+    let payload = payloadOf(1000)
+    let segments = mkHandler().performSegmentation(payload).get()
+    check h.bufferedBytes() == 0
+
+    discard h.handleIncomingSegment(segments[0])
+    check h.bufferedBytes() == h.chunkSize
+    discard h.handleIncomingSegment(segments[1])
+    check h.bufferedBytes() == 2 * h.chunkSize
+
+    check h.feed(segments).isSome()
+    check h.bufferedBytes() == 0
+    check h.pendingSets() == 0
+
+  test "expiry releases the bytes":
+    let h = SegmentationHandler
+      .new(
+        SegmentationConfig.init(
+          segmentSizeBytes = 256, reconstructionTimeoutSeconds = 1
+        ),
+        ignoreDropped,
+        ignoreDiscarded,
+        ignorePayload,
+      )
+      .expect("valid config")
+    discard h.feed(mkHandler().performSegmentation(payloadOf(1000)).get()[0 ..< 2])
+    check h.bufferedBytes() > 0
+    sleep(1100)
+    h.cleanupSegments()
+    check h.bufferedBytes() == 0
+
+  test "the byte bound evicts the least recently updated set":
+    let dropped = new seq[(seq[byte], SegmentSetDropReason)]
+    let h = SegmentationHandler
+      .new(
+        SegmentationConfig.init(
+          segmentSizeBytes = 256, maxSegmentSets = 100, maxBufferedBytes = 500
+        ),
+        onSetDropped = proc(hash: seq[byte], reason: SegmentSetDropReason) {.gcsafe.} =
+          dropped[].add((hash, reason)),
+        onSegmentDiscarded = ignoreDiscarded,
+        onPayloadReassembled = ignorePayload,
+      )
+      .expect("valid config")
+
+    # Two chunks of 192 fit in 500; the third forces an eviction.
+    for i in 0 .. 2:
+      let segs = mkHandler().performSegmentation(payloadOf(1000 + i)).get()
+      discard h.handleIncomingSegment(segs[0])
+
+    check h.bufferedBytes() <= 500
+    check dropped[].len == 1
+    check dropped[][0][1] == SegmentSetDropReason.Evicted
+    check h.pendingSets() == 2
+
+  test "maxBufferedBytes below segmentSizeBytes is rejected":
+    check SegmentationHandler
+      .new(
+        SegmentationConfig.init(segmentSizeBytes = 1024, maxBufferedBytes = 512),
+        ignoreDropped,
+        ignoreDiscarded,
+        ignorePayload,
+      )
+      .isErr()
+
+  test "the cap holds under a flood of distinct payloads":
+    let h = SegmentationHandler
+      .new(
+        SegmentationConfig.init(segmentSizeBytes = 256, maxBufferedBytes = 2000),
+        ignoreDropped,
+        ignoreDiscarded,
+        ignorePayload,
+      )
+      .expect("valid config")
+    for i in 0 ..< 50:
+      let segs = mkHandler().performSegmentation(payloadOf(1000 + i)).get()
+      discard h.handleIncomingSegment(segs[0])
+      check h.bufferedBytes() <= 2000

@@ -83,6 +83,7 @@ proc main() =
 
   doAssert delivered == payload, "round trip mismatch"
   doAssert rx.pendingSets() == 0, "set not released after delivery"
+  echo "buffered     : ", rx.bufferedBytes(), " bytes held at the end"
   echo "events       : ", events[]
   echo "elapsed      : ", (getMonoTime() - start).inMilliseconds, " ms"
   echo "OK: 1 MiB payload recovered exactly after parity-covered loss + shuffle"

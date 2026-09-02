@@ -18,8 +18,14 @@ const
     ## The spec's RECOMMENDED value, and Leopard-RS' 8-bit field ceiling.
 
   DefaultMaxSegmentSets* = 100
-    ## Concurrent partial sets retained; bounds what one sender can make a
-    ## receiver buffer.
+    ## Concurrent partial sets retained; bounds how many payloads may be in
+    ## flight at once.
+
+  DefaultMaxBufferedBytes* = 32 * 1024 * 1024
+    ## Ceiling on the segment payload bytes held across all incomplete sets, and
+    ## the bound that actually caps memory. `maxSegmentSets` alone would leave it
+    ## at `maxSegmentSets * maxTotalSegments * segmentSizeBytes` -- 2.5 GB at the
+    ## defaults. 32 MiB holds roughly thirty 1 MiB payloads mid-flight.
 
   SegmentHeaderMaxBytes* = 64
     ## Upper bound on everything a serialized `SegmentMessage` carries besides
@@ -37,6 +43,7 @@ type SegmentationConfig* = object ## Tunables for a `SegmentationHandler`.
   reconstructionTimeoutSeconds*: int
   maxTotalSegments*: int
   maxSegmentSets*: int
+  maxBufferedBytes*: int
 
 func init*(
     T: type SegmentationConfig,
@@ -45,6 +52,7 @@ func init*(
     reconstructionTimeoutSeconds: int = DefaultReconstructionTimeoutSeconds,
     maxTotalSegments: int = DefaultMaxTotalSegments,
     maxSegmentSets: int = DefaultMaxSegmentSets,
+    maxBufferedBytes: int = DefaultMaxBufferedBytes,
 ): T =
   ## Every field defaults, so a caller names only what it wants to change.
   ## Validation happens in `SegmentationHandler.new`, not here.
@@ -54,6 +62,7 @@ func init*(
     reconstructionTimeoutSeconds: reconstructionTimeoutSeconds,
     maxTotalSegments: maxTotalSegments,
     maxSegmentSets: maxSegmentSets,
+    maxBufferedBytes: maxBufferedBytes,
   )
 
 {.pop.}

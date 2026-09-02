@@ -108,6 +108,7 @@ Golden byte vectors for this encoding are pinned in [tests/test_wire_vectors.nim
 | `reconstructionTimeoutSeconds` | `300` | How long a set may go without a new segment before it is dropped. |
 | `maxTotalSegments` | `256` | Greatest number of segments one set may hold, data and parity together. |
 | `maxSegmentSets` | `100` | Concurrent partial sets retained; the least recently updated is evicted first. |
+| `maxBufferedBytes` | `32 MiB` | Segment bytes held across all incomplete sets. The bound that actually caps memory. |
 
 The chunk size is derived as `alignDown64(segmentSizeBytes - 64)`. It is rounded to a multiple of 64
 **unconditionally**, not only when this node emits parity: Reed–Solomon requires 64-aligned shards, so

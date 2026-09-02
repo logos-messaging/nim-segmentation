@@ -22,20 +22,30 @@ type AddOutcome* {.pure.} = enum
 type SegmentCache* = ref object
   sets: Table[string, SegmentSet]
   maxSets: int
+  maxBytes: int
+  heldBytes: int
   timeout: Duration
   onSetDropped: SegmentSetDroppedHandler
 
 func new*(
     T: type SegmentCache,
     maxSets: int,
+    maxBytes: int,
     timeout: Duration,
     onSetDropped: SegmentSetDroppedHandler = nil,
 ): T =
   ## `onSetDropped` fires for every set this cache abandons: expiry, eviction and
   ## the both-classes-known bound. `nil` disables it.
+  ##
+  ## Two independent bounds, as the spec's Segment Caching section requires:
+  ## `maxSets` caps how many payloads may be in flight, `maxBytes` caps what they
+  ## may occupy. The set cap alone leaves the byte ceiling at
+  ## `maxSets * maxTotalSegments * segmentSizeBytes`, which is far too large to
+  ## be the real protection.
   return T(
     sets: initTable[string, SegmentSet](),
     maxSets: maxSets,
+    maxBytes: maxBytes,
     timeout: timeout,
     onSetDropped: onSetDropped,
   )
@@ -47,11 +57,26 @@ proc notifyDropped(self: SegmentCache, s: SegmentSet, reason: SegmentSetDropReas
 func len*(self: SegmentCache): int =
   return self.sets.len
 
+func bufferedBytes*(self: SegmentCache): int =
+  ## Segment payload bytes currently held across all sets.
+  return self.heldBytes
+
+proc forget(self: SegmentCache, key: string): SegmentSet =
+  ## Remove a set and give back its byte budget. The single removal path, so the
+  ## running total cannot drift. Returns nil when the key was not held.
+  let s = self.sets.getOrDefault(key, nil)
+  if not s.isNil():
+    self.heldBytes -= s.heldBytes
+    self.sets.del(key)
+  return s
+
 func get*(self: SegmentCache, key: string): SegmentSet =
   return self.sets.getOrDefault(key, nil)
 
-func remove*(self: SegmentCache, key: string) =
-  self.sets.del(key)
+proc remove*(self: SegmentCache, key: string) =
+  ## Silent removal, for a set the caller has finished with or is dropping for a
+  ## reason it reports itself.
+  discard self.forget(key)
 
 proc sweep*(self: SegmentCache, now: MonoTime) =
   ## Drop sets that have gone `timeout` without a new segment, notifying for each.
@@ -60,25 +85,37 @@ proc sweep*(self: SegmentCache, now: MonoTime) =
     if now - s.lastUpdate >= self.timeout:
       expired.add(key)
   for key in expired:
-    let s = self.sets.getOrDefault(key, nil)
-    self.sets.del(key)
+    let s = self.forget(key)
     if not s.isNil():
       self.notifyDropped(s, SegmentSetDropReason.Expired)
 
-proc evictOldest(self: SegmentCache) =
+proc evictOldest(self: SegmentCache, keep: string = ""): bool =
+  ## Drop the least recently updated set, never `keep`. False when there was
+  ## nothing eligible left to drop.
   var oldestKey = ""
   var oldest = MonoTime.default
   var first = true
   for key, s in self.sets:
+    if key == keep:
+      continue
     if first or s.lastUpdate < oldest:
       oldest = s.lastUpdate
       oldestKey = key
       first = false
-  if not first:
-    let s = self.sets.getOrDefault(oldestKey, nil)
-    self.sets.del(oldestKey)
-    if not s.isNil():
-      self.notifyDropped(s, SegmentSetDropReason.Evicted)
+  if first:
+    return false
+  let s = self.forget(oldestKey)
+  if not s.isNil():
+    self.notifyDropped(s, SegmentSetDropReason.Evicted)
+  return true
+
+proc makeRoom(self: SegmentCache, needed: int, keep: string): bool =
+  ## Evict least-recently-updated sets until `needed` more bytes fit. False when
+  ## the budget cannot accommodate them even with everything else gone.
+  while self.heldBytes + needed > self.maxBytes:
+    if not self.evictOldest(keep):
+      return false
+  return true
 
 func recordCount(known: var Opt[uint32], count: uint32): bool =
   ## Fix a class count on first sight; reject a later segment that disagrees.
@@ -96,7 +133,7 @@ proc add*(
   var s = self.sets.getOrDefault(key, nil)
   if s.isNil():
     if self.sets.len >= self.maxSets:
-      evictOldest(self)
+      discard self.evictOldest()
     s = SegmentSet.new(m.originalPayloadHash, m.originalPayloadLength, now)
     self.sets[key] = s
 
@@ -112,7 +149,7 @@ proc add*(
   # `segment_count` alone cannot do.
   if s.dataCount.isSome() and s.parityCount.isSome():
     if int(s.dataCount.unsafeGet()) + int(s.parityCount.unsafeGet()) > maxTotalSegments:
-      self.sets.del(key)
+      discard self.forget(key)
       self.notifyDropped(s, SegmentSetDropReason.OverBounds)
       return (AddOutcome.Ignored, key, Opt.some(SegmentDiscardReason.Invalid))
 
@@ -122,11 +159,24 @@ proc add*(
   if m.isParity:
     if s.parity.hasKey(m.index):
       return (AddOutcome.Ignored, key, Opt.some(SegmentDiscardReason.Duplicate))
-    s.parity[m.index] = m.segmentPayload
   else:
     if s.data.hasKey(m.index):
       return (AddOutcome.Ignored, key, Opt.some(SegmentDiscardReason.Duplicate))
+
+  # Evict other sets to fit this segment; if the budget still cannot hold it,
+  # drop the set being built rather than exceeding the bound.
+  if not self.makeRoom(m.segmentPayload.len, key):
+    let dropped = self.forget(key)
+    if not dropped.isNil():
+      self.notifyDropped(dropped, SegmentSetDropReason.Evicted)
+    return (AddOutcome.Ignored, key, Opt.some(SegmentDiscardReason.CacheFull))
+
+  if m.isParity:
+    s.parity[m.index] = m.segmentPayload
+  else:
     s.data[m.index] = m.segmentPayload
+  s.heldBytes += m.segmentPayload.len
+  self.heldBytes += m.segmentPayload.len
 
   s.lastUpdate = now
   return (AddOutcome.Accepted, key, Opt.none(SegmentDiscardReason))

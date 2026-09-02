@@ -81,6 +81,11 @@ proc new*(
       "segmentation_handler.new: maxTotalSegments out of range: " &
         $config.maxTotalSegments & " not in [1, " & $MaxSupportedTotalSegments & "]"
     )
+  if config.maxBufferedBytes < config.segmentSizeBytes:
+    return err(
+      "segmentation_handler.new: maxBufferedBytes below segmentSizeBytes: " &
+        $config.maxBufferedBytes & " < " & $config.segmentSizeBytes
+    )
   if onSetDropped.isNil():
     return err("segmentation_handler.new: onSetDropped must not be nil")
   if onSegmentDiscarded.isNil():
@@ -104,6 +109,7 @@ proc new*(
       chunkSize: chunkSize,
       cache: SegmentCache.new(
         config.maxSegmentSets,
+        config.maxBufferedBytes,
         initDuration(seconds = config.reconstructionTimeoutSeconds),
         onSetDropped,
       ),
@@ -121,6 +127,10 @@ func chunkSize*(self: SegmentationHandler): int =
 func pendingSets*(self: SegmentationHandler): int =
   ## Segment sets currently held incomplete. Mainly for tests and metrics.
   return self.cache.len
+
+func bufferedBytes*(self: SegmentationHandler): int =
+  ## Segment payload bytes held across those sets, against `maxBufferedBytes`.
+  return self.cache.bufferedBytes
 
 # `new` rejects nil callbacks, so these need no guard.
 proc notifyDiscarded(self: SegmentationHandler, reason: SegmentDiscardReason) =

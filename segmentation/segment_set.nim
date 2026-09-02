@@ -21,6 +21,7 @@ type SegmentSet* = ref object
   data*: Table[uint32, seq[byte]]
   parity*: Table[uint32, seq[byte]]
   lastUpdate*: MonoTime
+  heldBytes*: int ## Sum of the stored segment payloads, for the cache's byte bound.
 
 func new*(
     T: type SegmentSet,

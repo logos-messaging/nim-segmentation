@@ -73,6 +73,7 @@
 ## ```nim
 ## handler.chunkSize(): int
 ## handler.pendingSets(): int
+## handler.bufferedBytes(): int
 ## ```
 ##
 ## **Wire unit**, for callers that inspect segments directly:

@@ -33,6 +33,9 @@ type SegmentDiscardReason* {.pure.} = enum
   Oversized ## `segment_payload` was longer than `segmentSizeBytes`.
   Duplicate ## The set already holds this `(is_parity, index)`.
   CountMismatch ## `segment_count` disagreed with the count already fixed for its class.
+  CacheFull
+    ## `maxBufferedBytes` could not accommodate the segment even after evicting
+    ## every other set. The set being built is dropped with it.
 
 type PayloadReassembledHandler* =
   proc(payload: ReassembledPayload) {.gcsafe, raises: [].}
