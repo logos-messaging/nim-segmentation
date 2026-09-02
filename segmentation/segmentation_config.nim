@@ -27,13 +27,28 @@ const
     ## at `maxSegmentSets * maxTotalSegments * segmentSizeBytes` -- 2.5 GB at the
     ## defaults. 32 MiB holds roughly thirty 1 MiB payloads mid-flight.
 
-  SegmentHeaderMaxBytes* = 64
+  SegmentHeaderMaxBytes* = 128
     ## Upper bound on everything a serialized `SegmentMessage` carries besides
-    ## the chunk itself: 34 bytes for the 32-byte hash, 6 each for the three
-    ## varint fields, 2 for the bool and up to 6 for the payload tag and length
-    ## prefix -- 58, rounded up to a multiple of `ShardAlignment`.
+    ## the chunk itself, at the largest value each field can take:
+    ##
+    ## | field | bytes |
+    ## |---|---|
+    ## | 1 `original_payload_hash` | tag 1 + len 1 + 32 = 34 |
+    ## | 2 `original_payload_length` | 1 + 5 |
+    ## | 3 `index` | 1 + 5 |
+    ## | 4 `data_segment_count` | 1 + 5 |
+    ## | 5 `parity_segment_count` | 1 + 5 |
+    ## | 6 `is_parity` | 1 + 1 |
+    ## | 7 `segment_payload` tag + length | 1 + 5 |
+    ## | | **66** |
+    ##
+    ## Rounded up to a multiple of `ShardAlignment` so that a 64-aligned
+    ## `segmentSizeBytes` yields a chunk size needing no further rounding.
 
-  MinSegmentSizeBytes* = 128 ## Below this the chunk size rounds down to zero.
+  MinSegmentSizeBytes* = 192
+    ## `SegmentHeaderMaxBytes` plus one whole shard; below this the chunk size
+    ## rounds down to zero. The `static` block in `segmentation_handler` holds
+    ## the two constants to that relationship.
 
   MaxSupportedTotalSegments* = 65_536 ## leopard rejects `buffers + parity` above this.
 

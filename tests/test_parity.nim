@@ -21,8 +21,11 @@ suite "shard alignment":
     check alignShardLen(63) == 0
 
 suite "parity count":
-  test "a single data segment gets no parity":
-    check parityCountFor(1, rate(0.125)) == 0
+  test "a single data segment may still carry parity":
+    # Reed-Solomon recovers from any dataCount segments whichever class they
+    # are, so one parity shard protects a one-segment payload.
+    check parityCountFor(1, rate(0.125)) == 1
+    check parityCountFor(1, rate(1.0)) == 1
 
   test "rate zero disables parity":
     for k in 1 .. 32:
@@ -36,12 +39,13 @@ suite "parity count":
     check parityCountFor(16, rate(0.125)) == 2
     check parityCountFor(17, rate(0.125)) == 3
 
-  test "parity stays the minority class":
-    # ceil(0.5 * 2) is 1, and the cap keeps it there rather than at 2.
+  test "parity never outnumbers the data segments":
     check parityCountFor(2, rate(0.5)) == 1
-    check parityCountFor(4, rate(0.9)) == 3
-    for k in 2 .. 64:
-      check parityCountFor(k, rate(0.99)) < k
+    check parityCountFor(4, rate(0.9)) == 4
+    # The cap is the data-segment count, which leopard also requires.
+    for k in 1 .. 64:
+      check parityCountFor(k, rate(1.0)) == k
+      check parityCountFor(k, rate(0.99)) <= k
 
   test "integer arithmetic avoids the float ceil() trap":
     # 0.125 * 8 in floating point can exceed 1.0, which would give 2 here.

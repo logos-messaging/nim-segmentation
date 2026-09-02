@@ -10,16 +10,17 @@ import segmentation
 const
   hashHex = "000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F"
 
-  # hash(f1) | length 500(f2) | index 1(f3) | count 3(f4) | payload(f6);
-  # is_parity is false, so proto3 leaves it off the wire.
-  dataHex = "0A20" & hashHex & "10F403" & "1801" & "2003" & "3203AABBCC"
+  # hash(f1) | length 500(f2) | index 1(f3) | data count 3(f4) | payload(f7).
+  # parity_segment_count is unset (no parity) and is_parity is false, so proto3
+  # leaves both off the wire.
+  dataHex = "0A20" & hashHex & "10F403" & "1801" & "2003" & "3A03AABBCC"
 
-  # hash(f1) | length 500(f2) | count 1(f4) | is_parity(f5) | payload(f6);
-  # index is 0 and therefore omitted.
-  parityHex = "0A20" & hashHex & "10F403" & "2001" & "2801" & "32021122"
+  # hash(f1) | length 500(f2) | data count 3(f4) | parity count 1(f5) |
+  # is_parity(f6) | payload(f7). index is 0 and therefore omitted.
+  parityHex = "0A20" & hashHex & "10F403" & "2003" & "2801" & "3001" & "3A021122"
 
-  # Only the hash and a segment count of 1 survive; every other field is at its
-  # proto3 default.
+  # Only the hash and a data-segment count of 1 survive; every other field is at
+  # its proto3 default, and parity_segment_count is unset.
   minimalHex = "0A20" & hashHex & "2001"
 
 proc bytes(hex: string): seq[byte] =
@@ -36,7 +37,8 @@ suite "wire vectors":
       originalPayloadHash = testHash,
       originalPayloadLength = 500'u64,
       index = 1'u32,
-      segmentCount = 3'u32,
+      dataSegmentCount = 3'u32,
+      paritySegmentCount = 0,
       isParity = false,
       segmentPayload = @[0xAA'u8, 0xBB, 0xCC],
     )
@@ -48,7 +50,8 @@ suite "wire vectors":
       originalPayloadHash = testHash,
       originalPayloadLength = 500'u64,
       index = 0'u32,
-      segmentCount = 1'u32,
+      dataSegmentCount = 3'u32,
+      paritySegmentCount = 1'u32,
       isParity = true,
       segmentPayload = @[0x11'u8, 0x22],
     )
@@ -60,7 +63,8 @@ suite "wire vectors":
       originalPayloadHash = testHash,
       originalPayloadLength = 0'u64,
       index = 0'u32,
-      segmentCount = 1'u32,
+      dataSegmentCount = 1'u32,
+      paritySegmentCount = 0,
       isParity = false,
       segmentPayload = @[],
     )
@@ -88,4 +92,4 @@ suite "wire vectors":
       else:
         checkpoint("unexpected wire type " & $wire)
         fail()
-    check tags == @[1, 2, 3, 4, 6]
+    check tags == @[1, 2, 3, 4, 7]

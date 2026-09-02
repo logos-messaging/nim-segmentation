@@ -13,7 +13,8 @@ suite "segment message wire format":
       originalPayloadHash = testHash,
       originalPayloadLength = 1234'u64,
       index = 2'u32,
-      segmentCount = 5'u32,
+      dataSegmentCount = 5'u32,
+      paritySegmentCount = 0,
       isParity = false,
       segmentPayload = @[1'u8, 2, 3],
     )
@@ -28,7 +29,8 @@ suite "segment message wire format":
       originalPayloadHash = testHash,
       originalPayloadLength = 9'u64,
       index = 0'u32,
-      segmentCount = 3'u32,
+      dataSegmentCount = 3'u32,
+      paritySegmentCount = 3'u32,
       isParity = true,
       segmentPayload = @[9'u8, 9, 9, 9],
     )
@@ -43,7 +45,8 @@ suite "segment message wire format":
       originalPayloadHash = testHash,
       originalPayloadLength = 0'u64,
       index = 0'u32,
-      segmentCount = 1'u32,
+      dataSegmentCount = 1'u32,
+      paritySegmentCount = 0,
       isParity = false,
       segmentPayload = @[],
     )
@@ -59,7 +62,8 @@ suite "segment message wire format":
       originalPayloadHash = testHash,
       originalPayloadLength = 8'u64,
       index = 1'u32,
-      segmentCount = 2'u32,
+      dataSegmentCount = 2'u32,
+      paritySegmentCount = 0,
       isParity = false,
       segmentPayload = @[7'u8],
     )
@@ -85,7 +89,7 @@ suite "segment message wire format":
 
     let m = SegmentMessage.decode(encoded)
     check m.isOk()
-    check m.get().segmentCount == uint32.high
+    check m.get().dataSegmentCount == uint32.high
     check not m.get().isValid(256)
 
   test "undecodable bytes are an error, not a crash":
@@ -100,7 +104,8 @@ suite "segment message validity":
       originalPayloadHash = testHash,
       originalPayloadLength = 10'u64,
       index = 0'u32,
-      segmentCount = 2'u32,
+      dataSegmentCount = 2'u32,
+      paritySegmentCount = 0,
       isParity = false,
       segmentPayload = @[1'u8],
     )
@@ -110,7 +115,7 @@ suite "segment message validity":
 
   test "single-segment sets are valid":
     var m = valid()
-    m.segmentCount = 1
+    m.dataSegmentCount = 1
     m.index = 0
     check m.isValid(maxTotal)
 
@@ -125,19 +130,51 @@ suite "segment message validity":
 
   test "segment count must be at least one":
     var m = valid()
-    m.segmentCount = 0
+    m.dataSegmentCount = 0
     check not m.isValid(maxTotal)
 
-  test "segment count must not exceed maxTotalSegments":
+  test "the two counts together must not exceed maxTotalSegments":
+    # Both counts ride on every segment, so the whole set is bounded here rather
+    # than only once segments of both classes have arrived.
     var m = valid()
-    m.segmentCount = uint32(maxTotal) + 1
-    m.index = 0
+    m.dataSegmentCount = uint32(maxTotal)
+    m.paritySegmentCount = 0
+    check m.isValid(maxTotal)
+
+    m.paritySegmentCount = 1
     check not m.isValid(maxTotal)
 
-  test "index must be below segment count":
+    var split = valid()
+    split.dataSegmentCount = uint32(maxTotal div 2)
+    split.paritySegmentCount = uint32(maxTotal div 2) + 1
+    check not split.isValid(maxTotal)
+
+  test "an unset parity count counts as zero":
     var m = valid()
-    m.segmentCount = 3
-    m.index = 3
+    m.dataSegmentCount = uint32(maxTotal)
+    m.paritySegmentCount = 0
+    check m.isValid(maxTotal)
+
+  test "index is checked against the segment's own class":
+    var data = valid()
+    data.dataSegmentCount = 3
+    data.paritySegmentCount = 8
+    data.index = 3 # beyond the data count, though within the parity one
+    check not data.isValid(maxTotal)
+
+    var parity = valid()
+    parity.isParity = true
+    parity.dataSegmentCount = 8
+    parity.paritySegmentCount = 3
+    parity.index = 3 # beyond the parity count, though within the data one
+    check not parity.isValid(maxTotal)
+    parity.index = 2
+    check parity.isValid(maxTotal)
+
+  test "a parity segment with no parity count is invalid":
+    var m = valid()
+    m.isParity = true
+    m.paritySegmentCount = 0
     check not m.isValid(maxTotal)
 
 suite "header budget":
@@ -149,7 +186,8 @@ suite "header budget":
         originalPayloadHash = testHash,
         originalPayloadLength = uint64(uint32.high),
         index = uint32.high - 1,
-        segmentCount = uint32.high,
+        dataSegmentCount = uint32.high,
+        paritySegmentCount = uint32.high,
         isParity = true,
         segmentPayload = newSeq[byte](payloadLen),
       )

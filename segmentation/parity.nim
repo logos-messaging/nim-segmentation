@@ -46,13 +46,15 @@ func parityCountFor*(dataCount, scaledParityRate: int): int =
   ## come out as 2, because the product evaluates to 1.0000000000000002. Two
   ## conforming implementations would then disagree on the parity count.
   ##
-  ## The `dataCount - 1` cap satisfies both the spec ("parity MUST remain the
-  ## minority class") and leopard's own `parity > buffers` rejection, and leaves
-  ## a single data segment with no parity.
-  if dataCount <= 1 or scaledParityRate <= 0:
+  ## Capped at `dataCount`, which is both what the spec requires ("parity
+  ## segments never outnumbering the data ones") and leopard's own
+  ## `parity > buffers` rejection. Reed-Solomon recovers from any `dataCount`
+  ## segments of a set whichever class they are, so parity equal to the data
+  ## count is useful rather than wasteful.
+  if dataCount < 1 or scaledParityRate <= 0:
     return 0
   let raw = (dataCount * scaledParityRate + ParityRateScale - 1) div ParityRateScale
-  return min(raw, dataCount - 1)
+  return min(raw, dataCount)
 
 func checkShards(
     shards: openArray[seq[byte]], shardLen: int, what: string

@@ -53,9 +53,9 @@
 ## ```nim
 ## onPayloadReassembled(reassembledPayload)    # a payload completed and verified
 ## onSegmentProgress(hash, held, expected)     # a segment was stored; partial arrival
-## onSetDropped(originalPayloadHash, reason)   # Expired, Evicted, OverBounds, HashMismatch
+## onSetDropped(originalPayloadHash, reason)   # Expired, Evicted, HashMismatch
 ## onSegmentDiscarded(reason)                  # Undecodable, Invalid, Oversized,
-##                                             # Duplicate, CountMismatch
+##                                             # Duplicate, CountMismatch, CacheFull
 ## ```
 ## All three are required, and `new` fails on a nil one. Reception discards far
 ## more than it delivers, and an expired, evicted or hash-failing set has no

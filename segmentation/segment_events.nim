@@ -19,7 +19,6 @@ type SegmentSetDropReason* {.pure.} = enum
   ## belonged to will never be delivered.
   Expired ## No further segment arrived within `reconstructionTimeoutSeconds`.
   Evicted ## `maxSegmentSets` was reached and this was the least recently updated.
-  OverBounds ## Both class counts became known and their sum exceeded `maxTotalSegments`.
   HashMismatch
     ## The set reassembled, but the payload did not match `original_payload_hash`.
     ## Either corruption, or the poisoning attack the spec's Integrity section

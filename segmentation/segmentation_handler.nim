@@ -71,10 +71,10 @@ proc new*(
       "segmentation_handler.new: segmentSizeBytes below the minimum: " &
         $config.segmentSizeBytes & " < " & $MinSegmentSizeBytes
     )
-  if config.parityRate < 0.0 or config.parityRate >= 1.0:
+  if config.parityRate < 0.0 or config.parityRate > 1.0:
     return err(
       "segmentation_handler.new: parityRate out of range: " & $config.parityRate &
-        " not in [0, 1)"
+        " not in [0, 1]"
     )
   if config.reconstructionTimeoutSeconds <= 0:
     return err(
@@ -191,7 +191,8 @@ proc performSegmentation*(
           originalPayloadHash = hash,
           originalPayloadLength = uint64(payload.len),
           index = uint32(i),
-          segmentCount = uint32(dataCount),
+          dataSegmentCount = uint32(dataCount),
+          paritySegmentCount = uint32(parityCount),
           isParity = false,
           segmentPayload = chunk,
         )
@@ -212,7 +213,8 @@ proc performSegmentation*(
             originalPayloadHash = hash,
             originalPayloadLength = uint64(payload.len),
             index = uint32(i),
-            segmentCount = uint32(parityCount),
+            dataSegmentCount = uint32(dataCount),
+            paritySegmentCount = uint32(parityCount),
             isParity = true,
             segmentPayload = shard,
           )
@@ -243,8 +245,7 @@ proc handleIncomingSegment*(
     self.notifyDiscarded(SegmentDiscardReason.Oversized)
     return ok(Opt.none(ReassembledPayload))
 
-  let (outcome, key, discardReason) =
-    self.cache.add(m, self.config.maxTotalSegments, now)
+  let (outcome, key, discardReason) = self.cache.add(m, now)
   if outcome == AddOutcome.Ignored:
     let reason = discardReason.valueOr:
       SegmentDiscardReason.Invalid
@@ -255,9 +256,7 @@ proc handleIncomingSegment*(
   if s.isNil():
     return ok(Opt.none(ReassembledPayload))
 
-  self.onSegmentProgress(
-    s.originalPayloadHash, s.heldSegments(), int(s.dataCount.valueOr(0'u32))
-  )
+  self.onSegmentProgress(s.originalPayloadHash, s.heldSegments(), int(s.dataCount))
 
   if not s.isReconstructible():
     return ok(Opt.none(ReassembledPayload))

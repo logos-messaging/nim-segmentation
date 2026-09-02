@@ -45,7 +45,7 @@ Everything else is reported through callbacks supplied at construction:
 let handler = SegmentationHandler.new(
   config,
   onSetDropped = proc(hash: seq[byte], reason: SegmentSetDropReason) {.gcsafe, raises: [].} =
-    # Expired | Evicted | OverBounds | HashMismatch -- this payload never arrives
+    # Expired | Evicted | HashMismatch -- this payload never arrives
     emitMessageLost(hash, reason),
   onSegmentDiscarded = proc(reason: SegmentDiscardReason) {.gcsafe, raises: [].} =
     # Undecodable | Invalid | Oversized | Duplicate | CountMismatch
@@ -91,12 +91,13 @@ an error as routine.
 syntax = "proto3";
 
 message SegmentMessage {
-  bytes  original_payload_hash   = 1;  // Keccak256 of the original payload, 32 bytes
-  uint32 original_payload_length = 2;  // length in bytes of the original payload
-  uint32 index                   = 3;  // position within this segment's own class
-  uint32 segment_count           = 4;  // number of items of the given class
-  bool   is_parity               = 5;  // selects the class the two fields above refer to
-  bytes  segment_payload         = 6;  // data chunk or parity shard
+  bytes           original_payload_hash   = 1;  // Keccak256 of the original payload, 32 bytes
+  uint32          original_payload_length = 2;  // length in bytes of the original payload
+  uint32          index                   = 3;  // zero-based position within this segment's own class
+  uint32          data_segment_count      = 4;  // number of data segments
+  optional uint32 parity_segment_count    = 5;  // number of parity segments, unset if no parity
+  bool            is_parity               = 6;  // false for a data segment, true for a parity one
+  bytes           segment_payload         = 7;  // this segment's data chunk or parity shard
 }
 ```
 
@@ -107,13 +108,13 @@ Golden byte vectors for this encoding are pinned in [tests/test_wire_vectors.nim
 | Field | Default | Meaning |
 |---|---|---|
 | `segmentSizeBytes` | `102_400` | Maximum size of a **serialized** segment message. |
-| `parityRate` | `0.0` | Parity segments as a fraction of data segments; `0` disables parity. Must be `< 1`. |
+| `parityRate` | `0.0` | Parity segments as a fraction of data segments; `0` disables parity. Must not exceed `1`. |
 | `reconstructionTimeoutSeconds` | `300` | How long a set may go without a new segment before it is dropped. |
 | `maxTotalSegments` | `256` | Greatest number of segments one set may hold, data and parity together. |
 | `maxSegmentSets` | `100` | Concurrent partial sets retained; the least recently updated is evicted first. |
 | `maxBufferedBytes` | `32 MiB` | Segment bytes held across all incomplete sets. The bound that actually caps memory. |
 
-The chunk size is derived as `alignDown64(segmentSizeBytes - 64)`. It is rounded to a multiple of 64
+The chunk size is derived as `alignDown64(segmentSizeBytes - 128)`. It is rounded to a multiple of 64
 **unconditionally**, not only when this node emits parity: Reed–Solomon requires 64-aligned shards, so
 aligning always means a receiver can decode a parity-bearing set even when its own `parityRate` is `0`.
 

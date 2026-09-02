@@ -1,8 +1,8 @@
 ## One partially received segment set: the segments of a single payload, and the
 ## rebuilding of that payload once enough of them have arrived.
 ##
-## The two class counts are held separately, each fixed by the first segment of
-## its class, because `segment_count` on the wire counts only its own class.
+## Every segment carries both class counts, so the shape of the set is known from
+## the first one to arrive, whichever class it belongs to.
 
 {.push raises: [].}
 import std/[monotimes, tables]
@@ -16,8 +16,8 @@ type SegmentSet* = ref object
   ## it is delivered or abandoned.
   originalPayloadHash*: seq[byte]
   originalPayloadLength*: uint64
-  dataCount*: Opt[uint32]
-  parityCount*: Opt[uint32]
+  dataCount*: uint32
+  parityCount*: uint32 ## Zero when the sender emitted no parity.
   data*: Table[uint32, seq[byte]]
   parity*: Table[uint32, seq[byte]]
   lastUpdate*: MonoTime
@@ -27,13 +27,18 @@ func new*(
     T: type SegmentSet,
     originalPayloadHash: seq[byte],
     originalPayloadLength: uint64,
+    dataCount: uint32,
+    parityCount: uint32,
     now: MonoTime,
 ): T =
-  ## Identity comes from the first segment filed here; every later segment of the
-  ## set carries the same pair, which is what `segmentSetKey` keys on.
+  ## Identity and shape both come from the first segment filed here; every later
+  ## segment of the set carries the same values, and one that disagrees is
+  ## discarded rather than admitted.
   return T(
     originalPayloadHash: originalPayloadHash,
     originalPayloadLength: originalPayloadLength,
+    dataCount: dataCount,
+    parityCount: parityCount,
     data: initTable[uint32, seq[byte]](),
     parity: initTable[uint32, seq[byte]](),
     lastUpdate: now,
@@ -43,14 +48,12 @@ func heldSegments*(self: SegmentSet): int =
   return self.data.len + self.parity.len
 
 func isReconstructible*(self: SegmentSet): bool =
-  ## Either every data segment has arrived, or data and parity together reach
-  ## the data-segment count. Both need the data count, which is why parity must
-  ## stay the minority class -- a receiver always sees a data segment first.
-  let dataCount = self.dataCount.valueOr:
-    return false
-  if uint32(self.data.len) >= dataCount:
+  ## Either every data segment has arrived, or data and parity together reach the
+  ## data-segment count -- Reed-Solomon recovers from any `dataCount` segments of
+  ## a set, whichever class they belong to.
+  if uint32(self.data.len) >= self.dataCount:
     return true
-  return uint32(self.data.len + self.parity.len) >= dataCount
+  return uint32(self.data.len + self.parity.len) >= self.dataCount
 
 func shardLengthOf(self: SegmentSet, dataCount: int): Result[int, string] =
   ## Parity shards are always exactly shard-length; so is any data segment but
@@ -79,9 +82,9 @@ func shardLengthOf(self: SegmentSet, dataCount: int): Result[int, string] =
 proc recoverThroughParity(
     self: SegmentSet, dataCount, payloadLen: int
 ): Result[Opt[seq[byte]], string] =
-  let parityClassCount = self.parityCount.valueOr:
+  let parityCount = int(self.parityCount)
+  if parityCount == 0:
     return ok(Opt.none(seq[byte]))
-  let parityCount = int(parityClassCount)
   let shardLen = ?shardLengthOf(self, dataCount)
 
   # A peer that chose an unaligned chunk size cannot be decoded here; wait for
@@ -119,9 +122,7 @@ proc assemble*(self: SegmentSet): Result[Opt[seq[byte]], string] =
   ## Rebuild the original payload. `ok(none)` means "not yet"; `err` means the
   ## set is unusable and is dropped.
   let payloadLen = int(self.originalPayloadLength)
-  let dataClassCount = self.dataCount.valueOr:
-    return ok(Opt.none(seq[byte]))
-  let dataCount = int(dataClassCount)
+  let dataCount = int(self.dataCount)
 
   var complete = true
   for i in 0 ..< dataCount:

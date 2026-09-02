@@ -17,7 +17,7 @@ proc ignoreProgress(hash: seq[byte], held, expected: int) {.gcsafe, raises: [].}
   discard
 
 proc mkHandler(
-    segmentSizeBytes = 256, parityRate = 0.0, maxTotalSegments = 256
+    segmentSizeBytes = 320, parityRate = 0.0, maxTotalSegments = 256
 ): SegmentationHandler =
   return SegmentationHandler
     .new(
@@ -62,7 +62,8 @@ suite "configuration":
 
   test "chunk size is aligned and leaves room for the header":
     let h = mkHandler(segmentSizeBytes = 102_400)
-    check h.chunkSize == 102_336
+    check h.chunkSize == 102_400 - SegmentHeaderMaxBytes
+    check h.chunkSize == 102_272
     check h.chunkSize mod 64 == 0
 
   test "invalid configuration is rejected":
@@ -77,7 +78,7 @@ suite "configuration":
       .isErr()
     check SegmentationHandler
       .new(
-        SegmentationConfig.init(parityRate = 1.0),
+        SegmentationConfig.init(parityRate = 1.1),
         ignoreDropped,
         ignoreDiscarded,
         ignorePayload,
@@ -155,7 +156,7 @@ suite "segmentation without parity":
     check segments.len == 1
 
     let m = SegmentMessage.decode(segments[0]).get()
-    check m.segmentCount == 1
+    check m.dataSegmentCount == 1
     check m.index == 0
     check not m.isParity
     check m.segmentPayload == payload
@@ -167,7 +168,7 @@ suite "segmentation without parity":
     let segments = h.performSegmentation(@[]).get()
     check segments.len == 1
     let m = SegmentMessage.decode(segments[0]).get()
-    check m.segmentCount == 1
+    check m.dataSegmentCount == 1
     check m.originalPayloadLength == 0
 
     check h.feed(segments).get().payload.len == 0
@@ -183,10 +184,10 @@ suite "segmentation without parity":
     check delivered.get().payload == payload
 
   test "every segment fits segmentSizeBytes":
-    let h = mkHandler(segmentSizeBytes = 256, parityRate = 0.125)
+    let h = mkHandler(segmentSizeBytes = 320, parityRate = 0.125)
     for size in [1, 63, 192, 193, 1000, 5000]:
       for s in h.performSegmentation(payloadOf(size)).get():
-        check s.len <= 256
+        check s.len <= 320
 
   test "a payload that is an exact multiple of the chunk size round-trips":
     let h = mkHandler()
@@ -260,7 +261,7 @@ suite "segmentation with parity":
       let m = SegmentMessage.decode(s).get()
       if m.isParity:
         check m.segmentPayload.len == h.chunkSize
-      elif m.index == m.segmentCount - 1:
+      elif m.index == m.dataSegmentCount - 1:
         check m.segmentPayload.len == 500 - 2 * h.chunkSize
       else:
         check m.segmentPayload.len == h.chunkSize
@@ -354,7 +355,7 @@ suite "integrity":
     check rx.feed(segments[0 ..< 3]).isNone()
 
     var liar = SegmentMessage.decode(segments[3]).get()
-    liar.segmentCount = 99
+    liar.dataSegmentCount = 99
     check rx.handleIncomingSegment(liar.encode().get()).get().isNone()
     # The genuine segment 3 is still accepted afterwards.
     check rx.feed(segments[3 .. ^1]).get().payload == payloadOf(1000)
@@ -367,7 +368,8 @@ suite "segment cache bounds and expiry":
       originalPayloadHash = h,
       originalPayloadLength = 100'u64,
       index = index,
-      segmentCount = count,
+      dataSegmentCount = count,
+      paritySegmentCount = 0,
       isParity = false,
       segmentPayload = @[1'u8],
     )
@@ -375,7 +377,7 @@ suite "segment cache bounds and expiry":
   test "a set idle past the timeout is dropped":
     let cache = SegmentCache.new(10, 1024 * 1024, initDuration(seconds = 30))
     let start = getMonoTime()
-    discard cache.add(segmentFor(1, 0, 4), 256, start)
+    discard cache.add(segmentFor(1, 0, 4), start)
     check cache.len == 1
 
     cache.sweep(start + initDuration(seconds = 29))
@@ -386,9 +388,9 @@ suite "segment cache bounds and expiry":
   test "a duplicate does not extend a set's life":
     let cache = SegmentCache.new(10, 1024 * 1024, initDuration(seconds = 30))
     let start = getMonoTime()
-    discard cache.add(segmentFor(1, 0, 4), 256, start)
+    discard cache.add(segmentFor(1, 0, 4), start)
 
-    let dup = cache.add(segmentFor(1, 0, 4), 256, start + initDuration(seconds = 20))
+    let dup = cache.add(segmentFor(1, 0, 4), start + initDuration(seconds = 20))
     check dup.outcome == AddOutcome.Ignored
 
     cache.sweep(start + initDuration(seconds = 31))
@@ -397,32 +399,36 @@ suite "segment cache bounds and expiry":
   test "the least recently updated set is evicted first":
     let cache = SegmentCache.new(2, 1024 * 1024, initDuration(seconds = 300))
     let start = getMonoTime()
-    discard cache.add(segmentFor(1, 0, 4), 256, start)
-    discard cache.add(segmentFor(2, 0, 4), 256, start + initDuration(seconds = 1))
+    discard cache.add(segmentFor(1, 0, 4), start)
+    discard cache.add(segmentFor(2, 0, 4), start + initDuration(seconds = 1))
     check cache.len == 2
 
-    discard cache.add(segmentFor(3, 0, 4), 256, start + initDuration(seconds = 2))
+    discard cache.add(segmentFor(3, 0, 4), start + initDuration(seconds = 2))
     check cache.len == 2
     check cache.get(segmentSetKey(segmentFor(1, 0, 4))).isNil()
     check not cache.get(segmentSetKey(segmentFor(3, 0, 4))).isNil()
 
-  test "a set whose two classes exceed maxTotalSegments is dropped":
+  test "a segment disagreeing on the counts is discarded, not admitted":
+    # The spec calls these different sets; keying on the counts would let one
+    # sender open unbounded sets under a single hash, so the segment is dropped.
     let cache = SegmentCache.new(10, 1024 * 1024, initDuration(seconds = 300))
     let now = getMonoTime()
-    discard cache.add(segmentFor(1, 0, 4), 6, now)
+    discard cache.add(segmentFor(1, 0, 4), now)
     check cache.len == 1
 
-    var parity = segmentFor(1, 0, 3)
-    parity.isParity = true
-    check cache.add(parity, 6, now).outcome == AddOutcome.Ignored
-    check cache.len == 0
+    var disagreeing = segmentFor(1, 1, 5)
+    let r = cache.add(disagreeing, now)
+    check r.outcome == AddOutcome.Ignored
+    check r.discardReason == Opt.some(SegmentDiscardReason.CountMismatch)
+    check cache.len == 1
+    check cache.get(segmentSetKey(segmentFor(1, 0, 4))).heldSegments() == 1
 
 suite "round-trip properties":
   test "random sizes, rates and erasure patterns all round-trip":
     var rng = initRand(20260902)
     for trial in 0 ..< 60:
       let parityRate = sample(rng, @[0.0, 0.125, 0.25, 0.5])
-      let tx = mkHandler(segmentSizeBytes = 256, parityRate = parityRate)
+      let tx = mkHandler(segmentSizeBytes = 320, parityRate = parityRate)
       let payload = payloadOf(rng.rand(0 .. 3000))
       var segments = tx.performSegmentation(payload).get()
 
@@ -441,7 +447,7 @@ suite "round-trip properties":
       rng.shuffle(kept)
 
       let delivered =
-        mkHandler(segmentSizeBytes = 256, parityRate = parityRate).feed(kept)
+        mkHandler(segmentSizeBytes = 320, parityRate = parityRate).feed(kept)
       check delivered.isSome()
       if delivered.isSome():
         check delivered.get().payload == payload
@@ -450,7 +456,7 @@ suite "reception events":
   proc handlerWithEvents(
       dropped: ref seq[(seq[byte], SegmentSetDropReason)],
       discarded: ref seq[SegmentDiscardReason],
-      segmentSizeBytes = 256,
+      segmentSizeBytes = 320,
       parityRate = 0.0,
       maxTotalSegments = 256,
       reconstructionTimeoutSeconds = 300,
@@ -537,7 +543,7 @@ suite "reception events":
     let discarded = new seq[SegmentDiscardReason]
     let h = SegmentationHandler
       .new(
-        SegmentationConfig.init(segmentSizeBytes = 256, maxSegmentSets = 1),
+        SegmentationConfig.init(segmentSizeBytes = 320, maxSegmentSets = 1),
         onSetDropped = proc(hash: seq[byte], reason: SegmentSetDropReason) {.gcsafe.} =
           dropped[].add((hash, reason)),
         onSegmentDiscarded = ignoreDiscarded,
@@ -560,37 +566,27 @@ suite "reception events":
     check h.handleIncomingSegment(@[0x0A'u8, 0x7F]).get().isNone()
     check h.feed(mkHandler().performSegmentation(payloadOf(1000)).get()).isSome()
 
-  test "a set exceeding maxTotalSegments reports OverBounds":
+  test "a segment over maxTotalSegments is rejected before a set exists":
+    # Both counts ride on every segment, so the sum is bounded by isValid. The
+    # set is never created, so this is a discard rather than a set drop.
     let dropped = new seq[(seq[byte], SegmentSetDropReason)]
     let discarded = new seq[SegmentDiscardReason]
     let h = handlerWithEvents(dropped, discarded, maxTotalSegments = 4)
 
     var hash = newSeq[byte](SegmentHashLen)
     hash[0] = 7
-    # Each is individually valid (segmentCount <= 4), but 3 data + 3 parity is 6.
-    let data = SegmentMessage.init(
+    let over = SegmentMessage.init(
       originalPayloadHash = hash,
       originalPayloadLength = 300,
       index = 0,
-      segmentCount = 3,
+      dataSegmentCount = 3,
+      paritySegmentCount = 3, # 3 + 3 exceeds the limit of 4
       isParity = false,
       segmentPayload = @[1'u8],
     )
-    let parity = SegmentMessage.init(
-      originalPayloadHash = hash,
-      originalPayloadLength = 300,
-      index = 0,
-      segmentCount = 3,
-      isParity = true,
-      segmentPayload = @[2'u8],
-    )
-    check h.handleIncomingSegment(data.encode().get()).get().isNone()
+    check h.handleIncomingSegment(over.encode().get()).get().isNone()
+    check discarded[] == @[SegmentDiscardReason.Invalid]
     check dropped[].len == 0
-    check h.handleIncomingSegment(parity.encode().get()).get().isNone()
-
-    check dropped[].len == 1
-    check dropped[][0][0] == hash
-    check dropped[][0][1] == SegmentSetDropReason.OverBounds
     check h.pendingSets() == 0
 
   test "a completed payload is reported once, with its hash":
@@ -601,7 +597,7 @@ suite "reception events":
 
     let h = SegmentationHandler
       .new(
-        SegmentationConfig.init(segmentSizeBytes = 256),
+        SegmentationConfig.init(segmentSizeBytes = 320),
         onSetDropped = ignoreDropped,
         onSegmentDiscarded = ignoreDiscarded,
         onPayloadReassembled = proc(p: ReassembledPayload) {.gcsafe.} =
@@ -622,7 +618,7 @@ suite "reception events":
     let reassembled = new seq[ReassembledPayload]
     let h = SegmentationHandler
       .new(
-        SegmentationConfig.init(segmentSizeBytes = 256),
+        SegmentationConfig.init(segmentSizeBytes = 320),
         onSetDropped = ignoreDropped,
         onSegmentDiscarded = ignoreDiscarded,
         onPayloadReassembled = proc(p: ReassembledPayload) {.gcsafe.} =
@@ -639,7 +635,7 @@ suite "reception events":
     let dropped = new seq[(seq[byte], SegmentSetDropReason)]
     let h = SegmentationHandler
       .new(
-        SegmentationConfig.init(segmentSizeBytes = 256),
+        SegmentationConfig.init(segmentSizeBytes = 320),
         onSetDropped = proc(hash: seq[byte], reason: SegmentSetDropReason) {.gcsafe.} =
           dropped[].add((hash, reason)),
         onSegmentDiscarded = ignoreDiscarded,
@@ -679,7 +675,7 @@ suite "buffered-byte bound":
     let h = SegmentationHandler
       .new(
         SegmentationConfig.init(
-          segmentSizeBytes = 256, reconstructionTimeoutSeconds = 1
+          segmentSizeBytes = 320, reconstructionTimeoutSeconds = 1
         ),
         ignoreDropped,
         ignoreDiscarded,
@@ -698,7 +694,7 @@ suite "buffered-byte bound":
     let h = SegmentationHandler
       .new(
         SegmentationConfig.init(
-          segmentSizeBytes = 256, maxSegmentSets = 100, maxBufferedBytes = 500
+          segmentSizeBytes = 320, maxSegmentSets = 100, maxBufferedBytes = 500
         ),
         onSetDropped = proc(hash: seq[byte], reason: SegmentSetDropReason) {.gcsafe.} =
           dropped[].add((hash, reason)),
@@ -732,7 +728,7 @@ suite "buffered-byte bound":
   test "the cap holds under a flood of distinct payloads":
     let h = SegmentationHandler
       .new(
-        SegmentationConfig.init(segmentSizeBytes = 256, maxBufferedBytes = 2000),
+        SegmentationConfig.init(segmentSizeBytes = 320, maxBufferedBytes = 2000),
         ignoreDropped,
         ignoreDiscarded,
         ignorePayload,
@@ -749,7 +745,7 @@ suite "progress reporting":
     let seen = new seq[(int, int)]
     let h = SegmentationHandler
       .new(
-        SegmentationConfig.init(segmentSizeBytes = 256),
+        SegmentationConfig.init(segmentSizeBytes = 320),
         ignoreDropped,
         ignoreDiscarded,
         ignorePayload,
@@ -769,7 +765,7 @@ suite "progress reporting":
     let hashes = new seq[seq[byte]]
     let h = SegmentationHandler
       .new(
-        SegmentationConfig.init(segmentSizeBytes = 256),
+        SegmentationConfig.init(segmentSizeBytes = 320),
         ignoreDropped,
         ignoreDiscarded,
         ignorePayload,
@@ -784,11 +780,11 @@ suite "progress reporting":
     discard h.handleIncomingSegment(segments[0])
     check hashes[] == @[expected]
 
-  test "a parity segment arriving first reports expected 0":
+  test "a parity segment arriving first already knows the data count":
     let seen = new seq[(int, int)]
     let h = SegmentationHandler
       .new(
-        SegmentationConfig.init(segmentSizeBytes = 256, parityRate = 0.5),
+        SegmentationConfig.init(segmentSizeBytes = 320, parityRate = 0.5),
         ignoreDropped,
         ignoreDiscarded,
         ignorePayload,
@@ -803,16 +799,16 @@ suite "progress reporting":
       mkHandler(parityRate = 0.5).performSegmentation(payloadOf(1000)).get()
     let parity = segments.filterIt(SegmentMessage.decode(it).get().isParity)
     check parity.len > 0
-    # segment_count on a parity segment counts parity, so the data count is not
-    # yet known.
+    # Every segment carries data_segment_count, so the shape of the set is known
+    # from the first one to arrive whichever class it belongs to.
     discard h.handleIncomingSegment(parity[0])
-    check seen[] == @[(1, 0)]
+    check seen[] == @[(1, 6)]
 
   test "a discarded segment reports no progress":
     let seen = new seq[(int, int)]
     let h = SegmentationHandler
       .new(
-        SegmentationConfig.init(segmentSizeBytes = 256),
+        SegmentationConfig.init(segmentSizeBytes = 320),
         ignoreDropped,
         ignoreDiscarded,
         ignorePayload,

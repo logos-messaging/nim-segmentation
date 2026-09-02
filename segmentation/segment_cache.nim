@@ -117,15 +117,8 @@ proc makeRoom(self: SegmentCache, needed: int, keep: string): bool =
       return false
   return true
 
-func recordCount(known: var Opt[uint32], count: uint32): bool =
-  ## Fix a class count on first sight; reject a later segment that disagrees.
-  if known.isSome():
-    return known.unsafeGet() == count
-  known = Opt.some(count)
-  return true
-
 proc add*(
-    self: SegmentCache, m: SegmentMessage, maxTotalSegments: int, now: MonoTime
+    self: SegmentCache, m: SegmentMessage, now: MonoTime
 ): tuple[outcome: AddOutcome, key: string, discardReason: Opt[SegmentDiscardReason]] =
   ## Store a segment that has already passed `isValid`.
   let key = segmentSetKey(m)
@@ -134,24 +127,17 @@ proc add*(
   if s.isNil():
     if self.sets.len >= self.maxSets:
       discard self.evictOldest()
-    s = SegmentSet.new(m.originalPayloadHash, m.originalPayloadLength, now)
+    s = SegmentSet.new(
+      m.originalPayloadHash, m.originalPayloadLength, m.dataSegmentCount,
+      m.paritySegmentCount, now,
+    )
     self.sets[key] = s
 
-  let counted =
-    if m.isParity:
-      recordCount(s.parityCount, m.segmentCount)
-    else:
-      recordCount(s.dataCount, m.segmentCount)
-  if not counted:
+  # The spec calls segments disagreeing on the counts different sets. Keying on
+  # the counts would let one sender open unbounded sets under a single hash, so
+  # the disagreeing segment is discarded instead.
+  if s.dataCount != m.dataSegmentCount or s.parityCount != m.paritySegmentCount:
     return (AddOutcome.Ignored, key, Opt.some(SegmentDiscardReason.CountMismatch))
-
-  # Once both classes are known the whole set can be bounded, which
-  # `segment_count` alone cannot do.
-  if s.dataCount.isSome() and s.parityCount.isSome():
-    if int(s.dataCount.unsafeGet()) + int(s.parityCount.unsafeGet()) > maxTotalSegments:
-      discard self.forget(key)
-      self.notifyDropped(s, SegmentSetDropReason.OverBounds)
-      return (AddOutcome.Ignored, key, Opt.some(SegmentDiscardReason.Invalid))
 
   # `(is_parity, index)` is unique within a set; a repeat is ignored rather than
   # overwritten, and must not extend the set's life -- the spec expires a set

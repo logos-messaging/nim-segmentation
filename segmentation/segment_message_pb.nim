@@ -6,25 +6,33 @@
 ## imports this module, never the reverse.
 
 {.push raises: [].}
-import protobuf_serialization
+import results
+import protobuf_serialization, protobuf_serialization/pkg/results
+
+export results
 
 type SegmentMessagePB* {.proto3.} = object
   ## Mirrors the spec's declaration field for field, except that the counts are
   ## widened: decoding an out-of-range varint straight into `uint32` truncates it
   ## silently, and `uint32(2^32 + 5)` is 5, which `isValid` would wave through.
+  ##
+  ## `paritySegmentCount` is the spec's one `optional` field -- unset means the
+  ## sender emitted no parity, which is distinct from a present zero.
   originalPayloadHash* {.fieldNumber: 1.}: seq[byte]
   originalPayloadLength* {.fieldNumber: 2, pint.}: uint64
   index* {.fieldNumber: 3, pint.}: uint64
-  segmentCount* {.fieldNumber: 4, pint.}: uint64
-  isParity* {.fieldNumber: 5.}: bool
-  segmentPayload* {.fieldNumber: 6.}: seq[byte]
+  dataSegmentCount* {.fieldNumber: 4, pint.}: uint64
+  paritySegmentCount* {.fieldNumber: 5, pint.}: Opt[uint64]
+  isParity* {.fieldNumber: 6.}: bool
+  segmentPayload* {.fieldNumber: 7.}: seq[byte]
 
 func init*(
     T: type SegmentMessagePB,
     originalPayloadHash: seq[byte],
     originalPayloadLength: uint64,
     index: uint64,
-    segmentCount: uint64,
+    dataSegmentCount: uint64,
+    paritySegmentCount: Opt[uint64],
     isParity: bool,
     segmentPayload: seq[byte],
 ): T =
@@ -32,7 +40,8 @@ func init*(
     originalPayloadHash: originalPayloadHash,
     originalPayloadLength: originalPayloadLength,
     index: index,
-    segmentCount: segmentCount,
+    dataSegmentCount: dataSegmentCount,
+    paritySegmentCount: paritySegmentCount,
     isParity: isParity,
     segmentPayload: segmentPayload,
   )
