@@ -1,0 +1,8 @@
+.DS_Store
+/build/
+nimble.develop
+nimble.paths
+nimbledeps
+segmentation.nims
+/.update.timestamp
+nph
