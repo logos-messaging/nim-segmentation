@@ -23,8 +23,6 @@
 import results
 import protobuf_serialization
 
-export results
-
 const SegmentHashLen* = 32
   ## Keccak256 digest length, the only accepted `originalPayloadHash` length.
 

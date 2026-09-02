@@ -15,8 +15,6 @@
 import results
 import leopard
 
-export results
-
 const ShardAlignment* = 64 ## leopard rejects a `bufSize` that is not a multiple of 64.
 
 func alignShardLen*(n: int): int =

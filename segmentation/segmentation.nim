@@ -8,7 +8,7 @@
 
 {.push raises: [].}
 
-import std/[math, monotimes, times]
+import std/[math, monotimes, tables, times]
 import results
 import nimcrypto/keccak
 import ./segment_message
