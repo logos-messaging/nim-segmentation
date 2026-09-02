@@ -89,6 +89,16 @@
 ##
 ## **Types**: `SegmentationHandler`, `SegmentationConfig`, `SegmentMessage`,
 ## `ReassembledPayload`.
+## **Security.** This library authenticates nothing. `original_payload_hash`
+## detects corruption and mismatched segments, but an attacker who can inject
+## transport messages can compute a consistent hash over a payload of their own,
+## or occupy an `(is_parity, index)` slot of a set in flight so the genuine
+## segment is ignored and the set fails its hash check -- surfacing as
+## `onSetDropped(..., HashMismatch)`. Applications SHOULD encrypt each serialized
+## `SegmentMessage` before transmission, which hides the hash and denies an
+## attacker the value that attack needs. Authenticity must come from another
+## layer.
+##
 ## **Constants**: `Default*` config values, `SegmentHashLen`,
 ## `SegmentHeaderMaxBytes`, `MinSegmentSizeBytes`, `MaxSupportedTotalSegments`.
 ##

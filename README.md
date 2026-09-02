@@ -154,6 +154,30 @@ seq API. Once that is merged and tagged upstream, move to a normal version range
 
 `nimble setup -l` builds the Leopard-RS C++ library via CMake (3.7+ required).
 
+## Security
+
+This library **authenticates nothing**, by design — the spec puts sender authentication
+out of scope.
+
+`original_payload_hash` detects accidental corruption and mismatched segments, but an
+attacker able to inject transport messages can compute a consistent hash over a payload of
+their own. The same attacker can deny reconstruction outright: injecting a segment that
+occupies an `(is_parity, index)` already held makes the receiver ignore the genuine one,
+so the set fails its hash check and never reconstructs. That surfaces as
+`onSetDropped(hash, HashMismatch)` — which is why that callback exists.
+
+**Applications SHOULD encrypt each serialized `SegmentMessage` before transmission.** That
+hides `original_payload_hash` from observers, which both keeps the segments of one payload
+from being linked to each other and denies an attacker the hash the poisoning attack needs.
+Applications requiring authenticity must obtain it from another layer.
+
+On memory: a remote sender controls how much a receiver buffers, so `maxSegmentSets` and
+`maxBufferedBytes` are the mitigation and both are enforced. Note they are **global, not
+per-sender** — this library takes no sender identity, so one hostile sender can evict
+another's in-flight sets. Where the transport authenticates senders, use one handler per
+sender to partition the budget. Rate limiting at the transport bounds how fast an attacker
+can create pending reconstructions.
+
 ## License
 
 Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or [MIT license](LICENSE-MIT) at
