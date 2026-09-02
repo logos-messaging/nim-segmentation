@@ -47,6 +47,16 @@ type PayloadReassembledHandler* =
   ## uniformly callback-driven alongside the drop and discard notifications.
   ## Acting on both would process every payload twice.
 
+type SegmentProgressHandler* =
+  proc(originalPayloadHash: seq[byte], held, expected: int) {.gcsafe, raises: [].}
+  ## Invoked for each segment stored, with the count now held for that payload
+  ## and the data-segment count needed to reconstruct it.
+  ##
+  ## The only outcome the return value cannot express: it speaks solely when a
+  ## set completes, so a large payload arriving over a lossy link is otherwise
+  ## invisible until the end. `expected` is 0 until the first data segment lands,
+  ## since `segment_count` on a parity segment counts parity.
+
 type SegmentSetDroppedHandler* = proc(
   originalPayloadHash: seq[byte], reason: SegmentSetDropReason
 ) {.gcsafe, raises: [].}

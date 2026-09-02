@@ -52,6 +52,9 @@ let handler = SegmentationHandler.new(
     metrics.inc(reason),
   onPayloadReassembled = proc(p: ReassembledPayload) {.gcsafe, raises: [].} =
     emitMessageReceived(p.originalPayloadHash, p.payload),
+  onSegmentProgress = proc(hash: seq[byte], held, expected: int) {.gcsafe, raises: [].} =
+    # Partial arrival -- the one outcome the return value cannot express
+    reportProgress(hash, held, expected),
 ).expect("valid config")
 ```
 

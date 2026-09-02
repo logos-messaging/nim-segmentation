@@ -13,6 +13,9 @@ proc ignoreDropped(
 proc ignoreDiscarded(reason: SegmentDiscardReason) {.gcsafe, raises: [].} =
   discard
 
+proc ignoreProgress(hash: seq[byte], held, expected: int) {.gcsafe, raises: [].} =
+  discard
+
 proc mkHandler(
     segmentSizeBytes = 256, parityRate = 0.0, maxTotalSegments = 256
 ): SegmentationHandler =
@@ -26,6 +29,7 @@ proc mkHandler(
       onSetDropped = ignoreDropped,
       onSegmentDiscarded = ignoreDiscarded,
       onPayloadReassembled = ignorePayload,
+      onSegmentProgress = ignoreProgress,
     )
     .expect("valid config")
 
@@ -47,7 +51,13 @@ proc feed(h: SegmentationHandler, segments: seq[seq[byte]]): Opt[ReassembledPayl
 suite "configuration":
   test "defaults are accepted":
     check SegmentationHandler
-      .new(SegmentationConfig.init(), ignoreDropped, ignoreDiscarded, ignorePayload)
+      .new(
+        SegmentationConfig.init(),
+        ignoreDropped,
+        ignoreDiscarded,
+        ignorePayload,
+        ignoreProgress,
+      )
       .isOk()
 
   test "chunk size is aligned and leaves room for the header":
@@ -62,6 +72,7 @@ suite "configuration":
         ignoreDropped,
         ignoreDiscarded,
         ignorePayload,
+        ignoreProgress,
       )
       .isErr()
     check SegmentationHandler
@@ -70,6 +81,7 @@ suite "configuration":
         ignoreDropped,
         ignoreDiscarded,
         ignorePayload,
+        ignoreProgress,
       )
       .isErr()
     check SegmentationHandler
@@ -78,6 +90,7 @@ suite "configuration":
         ignoreDropped,
         ignoreDiscarded,
         ignorePayload,
+        ignoreProgress,
       )
       .isErr()
     check SegmentationHandler
@@ -86,6 +99,7 @@ suite "configuration":
         ignoreDropped,
         ignoreDiscarded,
         ignorePayload,
+        ignoreProgress,
       )
       .isErr()
     check SegmentationHandler
@@ -94,6 +108,7 @@ suite "configuration":
         ignoreDropped,
         ignoreDiscarded,
         ignorePayload,
+        ignoreProgress,
       )
       .isErr()
 
@@ -102,24 +117,34 @@ suite "callbacks are mandatory":
     # Ignoring an outcome must be a decision written as an explicit no-op, not an
     # omission -- otherwise a consumer loses dropped payloads silently.
     check SegmentationHandler
-      .new(SegmentationConfig.init(), nil, ignoreDiscarded, ignorePayload)
+      .new(
+        SegmentationConfig.init(), nil, ignoreDiscarded, ignorePayload, ignoreProgress
+      )
       .isErr()
     check SegmentationHandler
-      .new(SegmentationConfig.init(), ignoreDropped, nil, ignorePayload)
+      .new(SegmentationConfig.init(), ignoreDropped, nil, ignorePayload, ignoreProgress)
       .isErr()
     check SegmentationHandler
-      .new(SegmentationConfig.init(), ignoreDropped, ignoreDiscarded, nil)
+      .new(
+        SegmentationConfig.init(), ignoreDropped, ignoreDiscarded, nil, ignoreProgress
+      )
       .isErr()
 
   test "the error names the missing callback":
     let e = SegmentationHandler.new(
-      SegmentationConfig.init(), nil, ignoreDiscarded, ignorePayload
+      SegmentationConfig.init(), nil, ignoreDiscarded, ignorePayload, ignoreProgress
     ).error
     check e.contains("onSetDropped")
 
   test "explicit no-ops are accepted":
     check SegmentationHandler
-      .new(SegmentationConfig.init(), ignoreDropped, ignoreDiscarded, ignorePayload)
+      .new(
+        SegmentationConfig.init(),
+        ignoreDropped,
+        ignoreDiscarded,
+        ignorePayload,
+        ignoreProgress,
+      )
       .isOk()
 
 suite "segmentation without parity":
@@ -443,6 +468,7 @@ suite "reception events":
         onSegmentDiscarded = proc(reason: SegmentDiscardReason) {.gcsafe.} =
           discarded[].add(reason),
         onPayloadReassembled = ignorePayload,
+        onSegmentProgress = ignoreProgress,
       )
       .expect("valid config")
 
@@ -516,6 +542,7 @@ suite "reception events":
           dropped[].add((hash, reason)),
         onSegmentDiscarded = ignoreDiscarded,
         onPayloadReassembled = ignorePayload,
+        onSegmentProgress = ignoreProgress,
       )
       .expect("valid config")
 
@@ -579,6 +606,7 @@ suite "reception events":
         onSegmentDiscarded = ignoreDiscarded,
         onPayloadReassembled = proc(p: ReassembledPayload) {.gcsafe.} =
           reassembled[].add(p),
+        onSegmentProgress = ignoreProgress,
       )
       .expect("valid config")
 
@@ -599,6 +627,7 @@ suite "reception events":
         onSegmentDiscarded = ignoreDiscarded,
         onPayloadReassembled = proc(p: ReassembledPayload) {.gcsafe.} =
           reassembled[].add(p),
+        onSegmentProgress = ignoreProgress,
       )
       .expect("valid config")
     let segments = mkHandler().performSegmentation(payloadOf(1000)).get()
@@ -616,6 +645,7 @@ suite "reception events":
         onSegmentDiscarded = ignoreDiscarded,
         onPayloadReassembled = proc(p: ReassembledPayload) {.gcsafe.} =
           reassembled[].add(p),
+        onSegmentProgress = ignoreProgress,
       )
       .expect("valid config")
 
@@ -654,6 +684,7 @@ suite "buffered-byte bound":
         ignoreDropped,
         ignoreDiscarded,
         ignorePayload,
+        ignoreProgress,
       )
       .expect("valid config")
     discard h.feed(mkHandler().performSegmentation(payloadOf(1000)).get()[0 ..< 2])
@@ -673,6 +704,7 @@ suite "buffered-byte bound":
           dropped[].add((hash, reason)),
         onSegmentDiscarded = ignoreDiscarded,
         onPayloadReassembled = ignorePayload,
+        onSegmentProgress = ignoreProgress,
       )
       .expect("valid config")
 
@@ -693,6 +725,7 @@ suite "buffered-byte bound":
         ignoreDropped,
         ignoreDiscarded,
         ignorePayload,
+        ignoreProgress,
       )
       .isErr()
 
@@ -703,9 +736,94 @@ suite "buffered-byte bound":
         ignoreDropped,
         ignoreDiscarded,
         ignorePayload,
+        ignoreProgress,
       )
       .expect("valid config")
     for i in 0 ..< 50:
       let segs = mkHandler().performSegmentation(payloadOf(1000 + i)).get()
       discard h.handleIncomingSegment(segs[0])
       check h.bufferedBytes() <= 2000
+
+suite "progress reporting":
+  test "progress is reported per stored segment, with the expected count":
+    let seen = new seq[(int, int)]
+    let h = SegmentationHandler
+      .new(
+        SegmentationConfig.init(segmentSizeBytes = 256),
+        ignoreDropped,
+        ignoreDiscarded,
+        ignorePayload,
+        onSegmentProgress = proc(
+            hash: seq[byte], held, expected: int
+        ) {.gcsafe, raises: [].} =
+          seen[].add((held, expected)),
+      )
+      .expect("valid config")
+
+    let segments = mkHandler().performSegmentation(payloadOf(1000)).get()
+    check segments.len == 6
+    check h.feed(segments).isSome()
+    check seen[] == @[(1, 6), (2, 6), (3, 6), (4, 6), (5, 6), (6, 6)]
+
+  test "progress carries the payload hash":
+    let hashes = new seq[seq[byte]]
+    let h = SegmentationHandler
+      .new(
+        SegmentationConfig.init(segmentSizeBytes = 256),
+        ignoreDropped,
+        ignoreDiscarded,
+        ignorePayload,
+        onSegmentProgress = proc(
+            hash: seq[byte], held, expected: int
+        ) {.gcsafe, raises: [].} =
+          hashes[].add(hash),
+      )
+      .expect("valid config")
+    let segments = mkHandler().performSegmentation(payloadOf(1000)).get()
+    let expected = SegmentMessage.decode(segments[0]).get().originalPayloadHash
+    discard h.handleIncomingSegment(segments[0])
+    check hashes[] == @[expected]
+
+  test "a parity segment arriving first reports expected 0":
+    let seen = new seq[(int, int)]
+    let h = SegmentationHandler
+      .new(
+        SegmentationConfig.init(segmentSizeBytes = 256, parityRate = 0.5),
+        ignoreDropped,
+        ignoreDiscarded,
+        ignorePayload,
+        onSegmentProgress = proc(
+            hash: seq[byte], held, expected: int
+        ) {.gcsafe, raises: [].} =
+          seen[].add((held, expected)),
+      )
+      .expect("valid config")
+
+    let segments =
+      mkHandler(parityRate = 0.5).performSegmentation(payloadOf(1000)).get()
+    let parity = segments.filterIt(SegmentMessage.decode(it).get().isParity)
+    check parity.len > 0
+    # segment_count on a parity segment counts parity, so the data count is not
+    # yet known.
+    discard h.handleIncomingSegment(parity[0])
+    check seen[] == @[(1, 0)]
+
+  test "a discarded segment reports no progress":
+    let seen = new seq[(int, int)]
+    let h = SegmentationHandler
+      .new(
+        SegmentationConfig.init(segmentSizeBytes = 256),
+        ignoreDropped,
+        ignoreDiscarded,
+        ignorePayload,
+        onSegmentProgress = proc(
+            hash: seq[byte], held, expected: int
+        ) {.gcsafe, raises: [].} =
+          seen[].add((held, expected)),
+      )
+      .expect("valid config")
+    let segments = mkHandler().performSegmentation(payloadOf(1000)).get()
+    discard h.handleIncomingSegment(segments[0])
+    discard h.handleIncomingSegment(segments[0]) # duplicate
+    discard h.handleIncomingSegment(@[0x0A'u8, 0x7F]) # undecodable
+    check seen[] == @[(1, 6)]

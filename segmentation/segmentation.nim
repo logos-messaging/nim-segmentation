@@ -30,7 +30,8 @@
 ## SegmentationHandler.new(config,
 ##                          onSetDropped,
 ##                          onSegmentDiscarded,
-##                          onPayloadReassembled): Result[SegmentationHandler, string]
+##                          onPayloadReassembled,
+##                          onSegmentProgress): Result[SegmentationHandler, string]
 ## ```
 ##
 ## **Sending**
@@ -51,6 +52,7 @@
 ## `new`, so a consumer can treat reception as uniformly event-driven:
 ## ```nim
 ## onPayloadReassembled(reassembledPayload)    # a payload completed and verified
+## onSegmentProgress(hash, held, expected)     # a segment was stored; partial arrival
 ## onSetDropped(originalPayloadHash, reason)   # Expired, Evicted, OverBounds, HashMismatch
 ## onSegmentDiscarded(reason)                  # Undecodable, Invalid, Oversized,
 ##                                             # Duplicate, CountMismatch

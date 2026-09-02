@@ -20,6 +20,9 @@ proc ignoreDropped(
 proc ignoreDiscarded(reason: SegmentDiscardReason) {.gcsafe, raises: [].} =
   discard
 
+proc ignoreProgress(hash: seq[byte], held, expected: int) {.gcsafe, raises: [].} =
+  discard
+
 proc main() =
   let payload = block:
     var rng = initRand(42)
@@ -36,6 +39,7 @@ proc main() =
       onSetDropped = ignoreDropped,
       onSegmentDiscarded = ignoreDiscarded,
       onPayloadReassembled = ignorePayload,
+      onSegmentProgress = ignoreProgress,
     )
     .expect("config")
 
@@ -72,6 +76,10 @@ proc main() =
         events[].add("discarded:" & $reason),
       onPayloadReassembled = proc(p: ReassembledPayload) {.gcsafe, raises: [].} =
         events[].add("reassembled:" & $p.payload.len & " bytes"),
+      onSegmentProgress = proc(
+          hash: seq[byte], held, expected: int
+      ) {.gcsafe, raises: [].} =
+        events[].add("progress:" & $held & "/" & $expected),
     )
     .expect("config")
 

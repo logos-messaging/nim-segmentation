@@ -37,6 +37,7 @@ type SegmentationHandler* = ref object
   onSetDropped: SegmentSetDroppedHandler
   onSegmentDiscarded: SegmentDiscardedHandler
   onPayloadReassembled: PayloadReassembledHandler
+  onSegmentProgress: SegmentProgressHandler
 
 proc new*(
     T: type SegmentationHandler,
@@ -44,6 +45,7 @@ proc new*(
     onSetDropped: SegmentSetDroppedHandler,
     onSegmentDiscarded: SegmentDiscardedHandler,
     onPayloadReassembled: PayloadReassembledHandler,
+    onSegmentProgress: SegmentProgressHandler,
 ): Result[T, string] =
   ## Validate `config` and derive the chunk size from it. Fails rather than
   ## clamping, so a misconfiguration surfaces at construction and not on the
@@ -58,6 +60,9 @@ proc new*(
   ## no other channel -- so a consumer that had not wired `onSetDropped` would
   ## lose payloads silently. Deciding to ignore an outcome is fine; it just has
   ## to be a decision, written as an explicit no-op rather than an omission.
+  ##
+  ## `onSegmentProgress` fires per stored segment, for reporting partial arrival
+  ## of a large payload.
   ##
   ## `onPayloadReassembled` carries the same payload the call returns; use one or
   ## the other, not both.
@@ -92,6 +97,8 @@ proc new*(
     return err("segmentation_handler.new: onSegmentDiscarded must not be nil")
   if onPayloadReassembled.isNil():
     return err("segmentation_handler.new: onPayloadReassembled must not be nil")
+  if onSegmentProgress.isNil():
+    return err("segmentation_handler.new: onSegmentProgress must not be nil")
   if config.maxSegmentSets < 1:
     return err(
       "segmentation_handler.new: maxSegmentSets not positive: " & $config.maxSegmentSets
@@ -116,6 +123,7 @@ proc new*(
       onSetDropped: onSetDropped,
       onSegmentDiscarded: onSegmentDiscarded,
       onPayloadReassembled: onPayloadReassembled,
+      onSegmentProgress: onSegmentProgress,
     )
   )
 
@@ -244,7 +252,14 @@ proc handleIncomingSegment*(
     return ok(Opt.none(ReassembledPayload))
 
   let s = self.cache.get(key)
-  if s.isNil() or not s.isReconstructible():
+  if s.isNil():
+    return ok(Opt.none(ReassembledPayload))
+
+  self.onSegmentProgress(
+    s.originalPayloadHash, s.heldSegments(), int(s.dataCount.valueOr(0'u32))
+  )
+
+  if not s.isReconstructible():
     return ok(Opt.none(ReassembledPayload))
 
   let assembled = s.assemble().valueOr:
