@@ -45,8 +45,8 @@ func checkShards(
   for i, s in shards:
     if s.len > 0 and s.len != shardLen:
       return err(
-        "malformed " & what & " shard " & $i & ": expected " & $shardLen & " bytes, got " &
-          $s.len
+        "parity.checkShards: malformed shard: " & what & " index " & $i & " is " & $s.len &
+          " bytes, expected " & $shardLen
       )
   return ok()
 
@@ -61,8 +61,8 @@ proc encodeParity*(
   for i, s in dataShards:
     if s.len != shardLen:
       return err(
-        "data shard " & $i & " is not padded to " & $shardLen & " bytes (got " & $s.len &
-          ")"
+        "parity.encodeParity: unpadded data shard: index " & $i & " is " & $s.len &
+          " bytes, expected " & $shardLen
       )
 
   var data = @dataShards
@@ -72,13 +72,13 @@ proc encodeParity*(
 
   let encRes = LeoEncoder.init(shardLen, dataShards.len, parityCount)
   if encRes.isErr:
-    return err("failed to init Reed-Solomon encoder: " & $encRes.error)
+    return err("parity.encodeParity: leopard encoder init failed: " & $encRes.error)
 
   var encoder = encRes.get()
   try:
     let encoded = encoder.encode(data, parity)
     if encoded.isErr:
-      return err("Reed-Solomon encoding failed: " & $encoded.error)
+      return err("parity.encodeParity: leopard encode failed: " & $encoded.error)
   finally:
     # No working destructor upstream, so the aligned buffers leak on any early
     # return unless freed here.
@@ -103,13 +103,13 @@ proc decodeParity*(
 
   let decRes = LeoDecoder.init(shardLen, dataShards.len, parityShards.len)
   if decRes.isErr:
-    return err("failed to init Reed-Solomon decoder: " & $decRes.error)
+    return err("parity.decodeParity: leopard decoder init failed: " & $decRes.error)
 
   var decoder = decRes.get()
   try:
     let decoded = decoder.decode(holey, parity, recovered)
     if decoded.isErr:
-      return err("Reed-Solomon decoding failed: " & $decoded.error)
+      return err("parity.decodeParity: leopard decode failed: " & $decoded.error)
   finally:
     decoder.free()
 

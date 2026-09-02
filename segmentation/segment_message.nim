@@ -85,13 +85,13 @@ proc encode*(m: SegmentMessage): Result[seq[byte], string] =
   try:
     return ok(Protobuf.encode(m.toPB))
   except CatchableError as e:
-    return err("failed to encode segment message: " & e.msg)
+    return err("segment_message.encode: protobuf encoding failed: " & e.msg)
 
 proc decodeBytes(data: seq[byte]): Result[SegmentMessage, string] =
   try:
     return ok(Protobuf.decode(data, SegmentMessagePB).fromPB)
   except CatchableError as e:
-    return err("failed to decode segment message: " & e.msg)
+    return err("segment_message.decode: protobuf decoding failed: " & e.msg)
 
 proc decode*(T: type SegmentMessage, data: seq[byte]): Result[SegmentMessage, string] =
   # Delegates to a concrete proc: this one is generic over `T`, so instantiating

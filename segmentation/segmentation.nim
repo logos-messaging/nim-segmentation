@@ -34,6 +34,11 @@ const
 
   MaxSupportedTotalSegments* = 65_536 ## leopard rejects `buffers + parity` above this.
 
+static:
+  # `new` rejects anything below MinSegmentSizeBytes, so this is what keeps the
+  # chunk size positive for every config it does accept.
+  doAssert alignShardLen(MinSegmentSizeBytes - SegmentHeaderMaxBytes) >= ShardAlignment
+
 type
   SegmentationConfig* = object
     segmentSizeBytes*: int
@@ -70,22 +75,33 @@ func init*(
 
 proc new*(T: type SegmentationHandler, config: SegmentationConfig): Result[T, string] =
   if config.segmentSizeBytes < MinSegmentSizeBytes:
-    return err("segmentSizeBytes must be at least " & $MinSegmentSizeBytes)
+    return err(
+      "segmentation.new: segmentSizeBytes below the minimum: " & $config.segmentSizeBytes &
+        " < " & $MinSegmentSizeBytes
+    )
   if config.parityRate < 0.0 or config.parityRate >= 1.0:
-    return err("parityRate must be in [0, 1)")
+    return err(
+      "segmentation.new: parityRate out of range: " & $config.parityRate &
+        " not in [0, 1)"
+    )
   if config.reconstructionTimeoutSeconds <= 0:
-    return err("reconstructionTimeoutSeconds must be positive")
+    return err(
+      "segmentation.new: reconstructionTimeoutSeconds not positive: " &
+        $config.reconstructionTimeoutSeconds
+    )
   if config.maxTotalSegments < 1 or config.maxTotalSegments > MaxSupportedTotalSegments:
-    return err("maxTotalSegments must be in [1, " & $MaxSupportedTotalSegments & "]")
+    return err(
+      "segmentation.new: maxTotalSegments out of range: " & $config.maxTotalSegments &
+        " not in [1, " & $MaxSupportedTotalSegments & "]"
+    )
   if config.maxSegmentSets < 1:
-    return err("maxSegmentSets must be positive")
+    return
+      err("segmentation.new: maxSegmentSets not positive: " & $config.maxSegmentSets)
 
   # Rounded to a multiple of 64 unconditionally, not only when this node emits
   # parity: it costs at most 63 bytes per segment and guarantees a receiver can
   # Reed-Solomon decode a set even when its own parityRate is 0.
   let chunkSize = alignShardLen(config.segmentSizeBytes - SegmentHeaderMaxBytes)
-  if chunkSize < ShardAlignment:
-    return err("segmentSizeBytes leaves no room for a chunk")
 
   return ok(
     T(
@@ -130,8 +146,9 @@ proc performSegmentation*(
   # maxTotalSegments whenever parity is on.
   if dataCount + parityCount > self.config.maxTotalSegments:
     return err(
-      "payload needs " & $(dataCount + parityCount) & " segments, above the " &
-        $self.config.maxTotalSegments & " allowed"
+      "segmentation.performSegmentation: too many segments for maxTotalSegments: " &
+        $dataCount & " data + " & $parityCount & " parity > " &
+        $self.config.maxTotalSegments
     )
 
   var segments = newSeq[seq[byte]]()
@@ -187,12 +204,19 @@ func shardLengthOf(s: SegmentSet, dataCount: int): Result[int, string] =
     if shardLen < 0:
       shardLen = p.len
     elif p.len != shardLen:
-      return err("parity shards disagree on length")
+      return err(
+        "segmentation.shardLengthOf: parity shards disagree on length: " & $p.len &
+          " and " & $shardLen
+      )
   if shardLen < 0:
-    return err("no parity shard to take the shard length from")
+    return
+      err("segmentation.shardLengthOf: no parity shard to take the shard length from")
   for idx, d in s.data:
     if int(idx) < dataCount - 1 and d.len != shardLen:
-      return err("data shard length disagrees with the parity shards")
+      return err(
+        "segmentation.shardLengthOf: data shard disagrees with the parity shard length: index " &
+          $idx & " is " & $d.len & " bytes, expected " & $shardLen
+      )
   return ok(shardLen)
 
 proc recoverThroughParity(
@@ -211,7 +235,10 @@ proc recoverThroughParity(
   # Cheap geometry check on the claimed length, so a hostile set is dropped
   # before any of it is assembled.
   if payloadLen > dataCount * shardLen or payloadLen <= (dataCount - 1) * shardLen:
-    return err("declared payload length does not fit the shard geometry")
+    return err(
+      "segmentation.recoverThroughParity: declared payload length does not fit the shard geometry: " &
+        $payloadLen & " bytes over " & $dataCount & " shards of " & $shardLen
+    )
 
   var data = newSeq[seq[byte]](dataCount)
   for i in 0 ..< dataCount:
@@ -257,11 +284,16 @@ proc assemble(
       return ok(Opt.none(seq[byte]))
 
   if assembled.len < payloadLen:
-    return err("assembled payload is shorter than the declared length")
+    return err(
+      "segmentation.assemble: assembled payload shorter than declared: " & $assembled.len &
+        " < " & $payloadLen
+    )
   assembled.setLen(payloadLen)
 
   if @(keccak256.digest(assembled).data) != hash:
-    return err("reconstructed payload does not match the declared hash")
+    return err(
+      "segmentation.assemble: reconstructed payload does not match the declared hash"
+    )
   return ok(Opt.some(assembled))
 
 proc handleIncomingSegment*(
