@@ -22,19 +22,25 @@ func alignShardLen*(n: int): int =
   ## only shrink a segment, so it can never push one past `segmentSizeBytes`.
   return (n div ShardAlignment) * ShardAlignment
 
-func parityCountFor*(dataCount: int, parityRatePpm: int): int =
+const ParityRateScale* = 1_000_000
+  ## Denominator the parity rate is carried over, so `parityRate = 0.125` is
+  ## scaled to 125_000. Keeping it a rational lets the count be derived in
+  ## integer arithmetic -- see `parityCountFor`.
+
+func parityCountFor*(dataCount, scaledParityRate: int): int =
   ## `ceil(parityRate * dataCount)`, capped so parity stays the minority class.
+  ## `scaledParityRate` is the rate numerator over `ParityRateScale`.
   ##
-  ## The rate arrives as parts-per-million so the count is computed in integer
-  ## arithmetic: `ceil(0.125 * 8)` in floating point can come out as 2, which
-  ## would make two conforming implementations disagree on the parity count.
+  ## Integer arithmetic is deliberate: `ceil(0.125 * 8)` in floating point can
+  ## come out as 2, because the product evaluates to 1.0000000000000002. Two
+  ## conforming implementations would then disagree on the parity count.
   ##
   ## The `dataCount - 1` cap satisfies both the spec ("parity MUST remain the
   ## minority class") and leopard's own `parity > buffers` rejection, and leaves
   ## a single data segment with no parity.
-  if dataCount <= 1 or parityRatePpm <= 0:
+  if dataCount <= 1 or scaledParityRate <= 0:
     return 0
-  let raw = (dataCount * parityRatePpm + 999_999) div 1_000_000
+  let raw = (dataCount * scaledParityRate + ParityRateScale - 1) div ParityRateScale
   return min(raw, dataCount - 1)
 
 func checkShards(
@@ -85,12 +91,16 @@ proc decodeParity*(
     dataShards, parityShards: openArray[seq[byte]], shardLen: int
 ): Result[seq[seq[byte]], string] =
   ## Recover the full set of data shards. Both arrays are passed at full length
-  ## with holes -- an empty seq marks a missing shard -- never compacted.
-  ## Returns every data shard at exactly `shardLen` bytes.
+  ## with holes -- an empty seq marks a missing shard -- never compacted, so
+  ## index `i` always refers to shard `i`. Returns every data shard at exactly
+  ## `shardLen` bytes.
   ?checkShards(dataShards, shardLen, "data")
   ?checkShards(parityShards, shardLen, "parity")
 
-  var holey = @dataShards
+  # leopard takes its inputs as `var openArray`, so the caller's shards are
+  # copied into locals it can bind to. `recovered` must be pre-sized: decode
+  # writes into it with `copyMem`, and only at the erased indices.
+  var data = @dataShards
   var parity = @parityShards
   var recovered = newSeq[seq[byte]](dataShards.len)
   for i in 0 ..< dataShards.len:
@@ -100,7 +110,7 @@ proc decodeParity*(
     return err("parity.decodeParity: leopard decoder init failed: " & $error)
 
   try:
-    decoder.decode(holey, parity, recovered).isOkOr:
+    decoder.decode(data, parity, recovered).isOkOr:
       return err("parity.decodeParity: leopard decode failed: " & $error)
   finally:
     decoder.free()

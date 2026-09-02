@@ -49,7 +49,7 @@ type
 
   SegmentationHandler* = ref object
     config: SegmentationConfig
-    parityRatePpm: int
+    scaledParityRate: int
     chunkSize: int
     cache: SegmentCache
 
@@ -106,7 +106,7 @@ proc new*(T: type SegmentationHandler, config: SegmentationConfig): Result[T, st
   return ok(
     T(
       config: config,
-      parityRatePpm: int(round(config.parityRate * 1_000_000.0)),
+      scaledParityRate: int(round(config.parityRate * float(ParityRateScale))),
       chunkSize: chunkSize,
       cache: newSegmentCache(
         config.maxSegmentSets,
@@ -140,7 +140,7 @@ proc performSegmentation*(
       1
     else:
       ceilDiv(payload.len, self.chunkSize)
-  let parityCount = parityCountFor(dataCount, self.parityRatePpm)
+  let parityCount = parityCountFor(dataCount, self.scaledParityRate)
 
   # The bound is on the sum, so the true data-chunk ceiling is below
   # maxTotalSegments whenever parity is on.

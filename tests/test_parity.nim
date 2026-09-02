@@ -3,6 +3,10 @@ import unittest2
 import results
 import segmentation/parity
 
+func rate(r: float): int =
+  ## The parity rate as `parityCountFor` takes it: a numerator over ParityRateScale.
+  return int(r * float(ParityRateScale))
+
 proc shard(seed, shardLen: int): seq[byte] =
   var s = newSeq[byte](shardLen)
   for i in 0 ..< shardLen:
@@ -19,30 +23,30 @@ suite "shard alignment":
 
 suite "parity count":
   test "a single data segment gets no parity":
-    check parityCountFor(1, 125_000) == 0
+    check parityCountFor(1, rate(0.125)) == 0
 
   test "rate zero disables parity":
     for k in 1 .. 32:
-      check parityCountFor(k, 0) == 0
+      check parityCountFor(k, rate(0.0)) == 0
 
   test "count is ceil(rate * dataCount)":
     # 0.125 is the rate the spec recommends: one parity per eight data.
-    check parityCountFor(2, 125_000) == 1
-    check parityCountFor(8, 125_000) == 1
-    check parityCountFor(9, 125_000) == 2
-    check parityCountFor(16, 125_000) == 2
-    check parityCountFor(17, 125_000) == 3
+    check parityCountFor(2, rate(0.125)) == 1
+    check parityCountFor(8, rate(0.125)) == 1
+    check parityCountFor(9, rate(0.125)) == 2
+    check parityCountFor(16, rate(0.125)) == 2
+    check parityCountFor(17, rate(0.125)) == 3
 
   test "parity stays the minority class":
     # ceil(0.5 * 2) is 1, and the cap keeps it there rather than at 2.
-    check parityCountFor(2, 500_000) == 1
-    check parityCountFor(4, 900_000) == 3
+    check parityCountFor(2, rate(0.5)) == 1
+    check parityCountFor(4, rate(0.9)) == 3
     for k in 2 .. 64:
-      check parityCountFor(k, 990_000) < k
+      check parityCountFor(k, rate(0.99)) < k
 
   test "integer arithmetic avoids the float ceil() trap":
     # 0.125 * 8 in floating point can exceed 1.0, which would give 2 here.
-    check parityCountFor(8, 125_000) == 1
+    check parityCountFor(8, rate(0.125)) == 1
 
 suite "reed-solomon round trip":
   const shardLen = 128
@@ -113,7 +117,7 @@ suite "reed-solomon round trip":
     var rng = initRand(20260902)
     for trial in 0 ..< 40:
       let dataCount = rng.rand(2 .. 24)
-      let parityCount = max(1, parityCountFor(dataCount, 250_000))
+      let parityCount = max(1, parityCountFor(dataCount, rate(0.25)))
       var data = newSeq[seq[byte]](dataCount)
       for i in 0 ..< dataCount:
         data[i] = shard(trial * 100 + i, shardLen)
