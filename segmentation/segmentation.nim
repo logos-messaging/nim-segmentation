@@ -222,9 +222,9 @@ func shardLengthOf(s: SegmentSet, dataCount: int): Result[int, string] =
 proc recoverThroughParity(
     s: SegmentSet, dataCount, payloadLen: int
 ): Result[Opt[seq[byte]], string] =
-  if s.parityCount.isNone():
+  let parityClassCount = s.parityCount.valueOr:
     return ok(Opt.none(seq[byte]))
-  let parityCount = int(s.parityCount.unsafeGet())
+  let parityCount = int(parityClassCount)
   let shardLen = ?shardLengthOf(s, dataCount)
 
   # A peer that chose an unaligned chunk size cannot be decoded here; wait for
@@ -264,9 +264,9 @@ proc assemble(
     s: SegmentSet, hash: seq[byte], payloadLen: int
 ): Result[Opt[seq[byte]], string] =
   ## `ok(none)` means "not yet"; `err` means the set is unusable and is dropped.
-  if s.dataCount.isNone():
+  let dataClassCount = s.dataCount.valueOr:
     return ok(Opt.none(seq[byte]))
-  let dataCount = int(s.dataCount.unsafeGet())
+  let dataCount = int(dataClassCount)
 
   var complete = true
   for i in 0 ..< dataCount:
