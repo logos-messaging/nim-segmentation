@@ -6,7 +6,6 @@
 ## imports this module, never the reverse.
 
 {.push raises: [].}
-
 import protobuf_serialization
 
 type SegmentMessagePB* {.proto3.} = object

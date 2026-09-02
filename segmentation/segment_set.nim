@@ -5,10 +5,8 @@
 ## its class, because `segment_count` on the wire counts only its own class.
 
 {.push raises: [].}
-
 import std/[monotimes, tables]
-import results
-import nimcrypto/keccak
+import results, nimcrypto/keccak
 import ./parity
 
 export monotimes, tables, results

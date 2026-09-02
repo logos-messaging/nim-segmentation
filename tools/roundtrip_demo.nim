@@ -1,7 +1,6 @@
 ## Manual end-to-end check: segment a 1 MiB payload with parity, drop as many
 ## data segments as parity can cover, shuffle the rest, and require an exact
 ## round trip. Run with `nim c -r -d:release tools/roundtrip_demo.nim`.
-
 import std/[algorithm, monotimes, random, sequtils, times]
 import results
 import segmentation

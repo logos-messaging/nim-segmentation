@@ -9,11 +9,9 @@
 ## payload assembly live in `reconstruction`.
 
 {.push raises: [].}
-
 import std/[monotimes, tables, times]
 import results
-import ./segment_message
-import ./segment_set
+import ./segment_message, ./segment_set
 
 export segment_set, monotimes, tables, times
 

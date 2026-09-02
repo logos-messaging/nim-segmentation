@@ -6,16 +6,15 @@
 ## chunk size.
 
 {.push raises: [].}
-
 import std/[math, monotimes, times]
-import results
-import nimcrypto/keccak
-import ./parity
-import ./segment_set
-import ./reassembled_payload
-import ./segment_cache
-import ./segment_message
-import ./segmentation_config
+import results, nimcrypto/keccak
+import
+  ./parity,
+  ./segment_set,
+  ./reassembled_payload,
+  ./segment_cache,
+  ./segment_message,
+  ./segmentation_config
 
 export reassembled_payload, segmentation_config, segment_message, results
 

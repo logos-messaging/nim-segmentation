@@ -1,5 +1,4 @@
-import unittest2
-import results
+import unittest2, results
 import segmentation
 
 const testHash = block:

@@ -18,9 +18,7 @@
 ## than by presence.
 
 {.push raises: [].}
-
-import results
-import protobuf_serialization
+import results, protobuf_serialization
 import ./segment_message_pb
 
 export results, segment_message_pb

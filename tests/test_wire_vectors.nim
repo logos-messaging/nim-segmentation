@@ -3,10 +3,8 @@
 ## These byte strings are the contract with every other implementation of
 ## LIP-243. A refactor that changes them changes the protocol, so they are
 ## pinned here rather than being recomputed from the code under test.
-
 import std/strutils
-import unittest2
-import results
+import unittest2, results
 import segmentation
 
 const

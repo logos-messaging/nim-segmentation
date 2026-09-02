@@ -17,12 +17,12 @@
 ## - `parity`               -- Reed-Solomon helpers (no type of its own)
 ##
 ## Spec: https://github.com/logos-co/logos-lips -- messaging/application/raw/segmentation.md
-
-import ./segmentation_handler
-import ./segment_message
-import ./segment_message_pb
-import ./segmentation_config
-import ./reassembled_payload
+import
+  ./segmentation_handler,
+  ./segment_message,
+  ./segment_message_pb,
+  ./segmentation_config,
+  ./reassembled_payload
 
 export
   segmentation_handler, segment_message, segment_message_pb, segmentation_config,

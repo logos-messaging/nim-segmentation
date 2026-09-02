@@ -1,6 +1,5 @@
 import std/[random, sequtils]
-import unittest2
-import results
+import unittest2, results
 import segmentation/parity
 
 func rate(r: float): int =

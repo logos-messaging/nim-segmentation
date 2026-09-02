@@ -11,9 +11,7 @@
 ## there, so `decodeParity` merges the two itself.
 
 {.push raises: [].}
-
-import results
-import leopard
+import results, leopard
 
 const ShardAlignment* = 64 ## leopard rejects a `bufSize` that is not a multiple of 64.
 

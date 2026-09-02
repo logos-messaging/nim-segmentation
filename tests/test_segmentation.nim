@@ -1,8 +1,6 @@
 import std/[algorithm, random, sequtils, times]
-import unittest2
-import results
-import segmentation
-import segmentation/segment_cache
+import unittest2, results
+import segmentation, segmentation/segment_cache
 
 proc mkHandler(
     segmentSizeBytes = 256, parityRate = 0.0, maxTotalSegments = 256
