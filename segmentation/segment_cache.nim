@@ -11,9 +11,9 @@
 {.push raises: [].}
 import std/[monotimes, tables, times]
 import results
-import ./segment_message, ./segment_set
+import ./segment_events, ./segment_message, ./segment_set
 
-export segment_set, monotimes, tables, times
+export segment_events, segment_set, monotimes, tables, times
 
 type AddOutcome* {.pure.} = enum
   Accepted ## Stored; the set may now be reconstructible.
@@ -23,9 +23,26 @@ type SegmentCache* = ref object
   sets: Table[string, SegmentSet]
   maxSets: int
   timeout: Duration
+  onSetDropped: SegmentSetDroppedHandler
 
-func new*(T: type SegmentCache, maxSets: int, timeout: Duration): T =
-  return T(sets: initTable[string, SegmentSet](), maxSets: maxSets, timeout: timeout)
+func new*(
+    T: type SegmentCache,
+    maxSets: int,
+    timeout: Duration,
+    onSetDropped: SegmentSetDroppedHandler = nil,
+): T =
+  ## `onSetDropped` fires for every set this cache abandons: expiry, eviction and
+  ## the both-classes-known bound. `nil` disables it.
+  return T(
+    sets: initTable[string, SegmentSet](),
+    maxSets: maxSets,
+    timeout: timeout,
+    onSetDropped: onSetDropped,
+  )
+
+proc notifyDropped(self: SegmentCache, s: SegmentSet, reason: SegmentSetDropReason) =
+  if not self.onSetDropped.isNil():
+    self.onSetDropped(s.originalPayloadHash, reason)
 
 func len*(self: SegmentCache): int =
   return self.sets.len
@@ -36,16 +53,19 @@ func get*(self: SegmentCache, key: string): SegmentSet =
 func remove*(self: SegmentCache, key: string) =
   self.sets.del(key)
 
-func sweep*(self: SegmentCache, now: MonoTime) =
-  ## Drop sets that have gone `timeout` without a new segment.
+proc sweep*(self: SegmentCache, now: MonoTime) =
+  ## Drop sets that have gone `timeout` without a new segment, notifying for each.
   var expired: seq[string]
   for key, s in self.sets:
     if now - s.lastUpdate >= self.timeout:
       expired.add(key)
   for key in expired:
+    let s = self.sets.getOrDefault(key, nil)
     self.sets.del(key)
+    if not s.isNil():
+      self.notifyDropped(s, SegmentSetDropReason.Expired)
 
-func evictOldest(self: SegmentCache) =
+proc evictOldest(self: SegmentCache) =
   var oldestKey = ""
   var oldest = MonoTime.default
   var first = true
@@ -55,7 +75,10 @@ func evictOldest(self: SegmentCache) =
       oldestKey = key
       first = false
   if not first:
+    let s = self.sets.getOrDefault(oldestKey, nil)
     self.sets.del(oldestKey)
+    if not s.isNil():
+      self.notifyDropped(s, SegmentSetDropReason.Evicted)
 
 func recordCount(known: var Opt[uint32], count: uint32): bool =
   ## Fix a class count on first sight; reject a later segment that disagrees.
@@ -64,9 +87,9 @@ func recordCount(known: var Opt[uint32], count: uint32): bool =
   known = Opt.some(count)
   return true
 
-func add*(
+proc add*(
     self: SegmentCache, m: SegmentMessage, maxTotalSegments: int, now: MonoTime
-): tuple[outcome: AddOutcome, key: string] =
+): tuple[outcome: AddOutcome, key: string, discardReason: Opt[SegmentDiscardReason]] =
   ## Store a segment that has already passed `isValid`.
   let key = segmentSetKey(m)
 
@@ -74,7 +97,7 @@ func add*(
   if s.isNil():
     if self.sets.len >= self.maxSets:
       evictOldest(self)
-    s = SegmentSet.new(now)
+    s = SegmentSet.new(m.originalPayloadHash, m.originalPayloadLength, now)
     self.sets[key] = s
 
   let counted =
@@ -83,28 +106,29 @@ func add*(
     else:
       recordCount(s.dataCount, m.segmentCount)
   if not counted:
-    return (AddOutcome.Ignored, key)
+    return (AddOutcome.Ignored, key, Opt.some(SegmentDiscardReason.CountMismatch))
 
   # Once both classes are known the whole set can be bounded, which
   # `segment_count` alone cannot do.
   if s.dataCount.isSome() and s.parityCount.isSome():
     if int(s.dataCount.unsafeGet()) + int(s.parityCount.unsafeGet()) > maxTotalSegments:
       self.sets.del(key)
-      return (AddOutcome.Ignored, key)
+      self.notifyDropped(s, SegmentSetDropReason.OverBounds)
+      return (AddOutcome.Ignored, key, Opt.some(SegmentDiscardReason.Invalid))
 
   # `(is_parity, index)` is unique within a set; a repeat is ignored rather than
   # overwritten, and must not extend the set's life -- the spec expires a set
   # that receives no *further* segments.
   if m.isParity:
     if s.parity.hasKey(m.index):
-      return (AddOutcome.Ignored, key)
+      return (AddOutcome.Ignored, key, Opt.some(SegmentDiscardReason.Duplicate))
     s.parity[m.index] = m.segmentPayload
   else:
     if s.data.hasKey(m.index):
-      return (AddOutcome.Ignored, key)
+      return (AddOutcome.Ignored, key, Opt.some(SegmentDiscardReason.Duplicate))
     s.data[m.index] = m.segmentPayload
 
   s.lastUpdate = now
-  return (AddOutcome.Accepted, key)
+  return (AddOutcome.Accepted, key, Opt.none(SegmentDiscardReason))
 
 {.pop.}

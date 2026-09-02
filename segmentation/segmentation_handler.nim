@@ -13,10 +13,12 @@ import
   ./segment_set,
   ./reassembled_payload,
   ./segment_cache,
+  ./segment_events,
   ./segment_message,
   ./segmentation_config
 
-export reassembled_payload, segmentation_config, segment_message, results
+export
+  reassembled_payload, segmentation_config, segment_events, segment_message, results
 
 static:
   # `new` rejects anything below MinSegmentSizeBytes, so this is what keeps the
@@ -30,11 +32,31 @@ type SegmentationHandler* = ref object
   scaledParityRate: int
   chunkSize: int
   cache: SegmentCache
+  # The cache reports the drops it owns; HashMismatch is detected here, after a
+  # set has already been handed back, so the handler needs the callback too.
+  onSetDropped: SegmentSetDroppedHandler
+  onSegmentDiscarded: SegmentDiscardedHandler
+  onPayloadReassembled: PayloadReassembledHandler
 
-proc new*(T: type SegmentationHandler, config: SegmentationConfig): Result[T, string] =
+proc new*(
+    T: type SegmentationHandler,
+    config: SegmentationConfig,
+    onSetDropped: SegmentSetDroppedHandler = nil,
+    onSegmentDiscarded: SegmentDiscardedHandler = nil,
+    onPayloadReassembled: PayloadReassembledHandler = nil,
+): Result[T, string] =
   ## Validate `config` and derive the chunk size from it. Fails rather than
   ## clamping, so a misconfiguration surfaces at construction and not on the
   ## first send.
+  ##
+  ## The callbacks report every reception outcome: `onPayloadReassembled` when a
+  ## payload completes, `onSetDropped` once per abandoned payload, and
+  ## `onSegmentDiscarded` per rejected segment. All default to `nil`, which
+  ## disables them, and all are fixed at construction, so a handler is never
+  ## half-wired.
+  ##
+  ## `onPayloadReassembled` carries the same payload the call returns; use one or
+  ## the other, not both.
   if config.segmentSizeBytes < MinSegmentSizeBytes:
     return err(
       "segmentation_handler.new: segmentSizeBytes below the minimum: " &
@@ -73,7 +95,11 @@ proc new*(T: type SegmentationHandler, config: SegmentationConfig): Result[T, st
       cache: SegmentCache.new(
         config.maxSegmentSets,
         initDuration(seconds = config.reconstructionTimeoutSeconds),
+        onSetDropped,
       ),
+      onSetDropped: onSetDropped,
+      onSegmentDiscarded: onSegmentDiscarded,
+      onPayloadReassembled: onPayloadReassembled,
     )
   )
 
@@ -85,6 +111,16 @@ func chunkSize*(self: SegmentationHandler): int =
 func pendingSets*(self: SegmentationHandler): int =
   ## Segment sets currently held incomplete. Mainly for tests and metrics.
   return self.cache.len
+
+proc notifyDiscarded(self: SegmentationHandler, reason: SegmentDiscardReason) =
+  if not self.onSegmentDiscarded.isNil():
+    self.onSegmentDiscarded(reason)
+
+proc notifySetDropped(
+    self: SegmentationHandler, s: SegmentSet, reason: SegmentSetDropReason
+) =
+  if not self.onSetDropped.isNil():
+    self.onSetDropped(s.originalPayloadHash, reason)
 
 proc performSegmentation*(
     self: SegmentationHandler, payload: seq[byte]
@@ -170,38 +206,45 @@ proc handleIncomingSegment*(
   self.cache.sweep(now)
 
   let m = SegmentMessage.decode(segmentBytes).valueOr:
+    self.notifyDiscarded(SegmentDiscardReason.Undecodable)
     return ok(Opt.none(ReassembledPayload))
 
   if not m.isValid(self.config.maxTotalSegments):
+    self.notifyDiscarded(SegmentDiscardReason.Invalid)
     return ok(Opt.none(ReassembledPayload))
   if m.segmentPayload.len > self.config.segmentSizeBytes:
+    self.notifyDiscarded(SegmentDiscardReason.Oversized)
     return ok(Opt.none(ReassembledPayload))
 
-  let (outcome, key) = self.cache.add(m, self.config.maxTotalSegments, now)
+  let (outcome, key, discardReason) =
+    self.cache.add(m, self.config.maxTotalSegments, now)
   if outcome == AddOutcome.Ignored:
+    let reason = discardReason.valueOr:
+      SegmentDiscardReason.Invalid
+    self.notifyDiscarded(reason)
     return ok(Opt.none(ReassembledPayload))
 
   let s = self.cache.get(key)
   if s.isNil() or not s.isReconstructible():
     return ok(Opt.none(ReassembledPayload))
 
-  let assembled = assemble(s, m.originalPayloadHash, int(m.originalPayloadLength)).valueOr:
+  let assembled = s.assemble().valueOr:
     # The spec leaves hash-failure behaviour undefined. Drop the set: keeping it
     # would let one bad shard wedge reconstruction until the timeout.
     self.cache.remove(key)
+    self.notifySetDropped(s, SegmentSetDropReason.HashMismatch)
     return ok(Opt.none(ReassembledPayload))
 
   let payload = assembled.valueOr:
     return ok(Opt.none(ReassembledPayload))
 
   self.cache.remove(key)
-  return ok(
-    Opt.some(
-      ReassembledPayload.init(
-        payload = payload, originalPayloadHash = m.originalPayloadHash
-      )
-    )
+  let reassembled = ReassembledPayload.init(
+    payload = payload, originalPayloadHash = m.originalPayloadHash
   )
+  if not self.onPayloadReassembled.isNil():
+    self.onPayloadReassembled(reassembled)
+  return ok(Opt.some(reassembled))
 
 proc cleanupSegments*(self: SegmentationHandler) =
   ## Drop segment sets that have gone `reconstructionTimeoutSeconds` without a

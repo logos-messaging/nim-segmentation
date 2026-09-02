@@ -32,9 +32,37 @@ let reassembled = handler.handleIncomingSegment(received).get()
 if reassembled.isSome():
   deliver(reassembled.get().payload)
 
-# Drop segment sets that went quiet before completing.
+# Drop segment sets that went quiet before completing. Nothing else sweeps them,
+# so run this on a timer or the reconstruction timeout only bites on the next
+# arriving segment.
 handler.cleanupSegments()
 ```
+
+Reception discards more than it delivers, and the return value describes only delivery.
+Everything else is reported through callbacks supplied at construction:
+
+```nim
+let handler = SegmentationHandler.new(
+  config,
+  onSetDropped = proc(hash: seq[byte], reason: SegmentSetDropReason) {.gcsafe, raises: [].} =
+    # Expired | Evicted | OverBounds | HashMismatch -- this payload never arrives
+    emitMessageLost(hash, reason),
+  onSegmentDiscarded = proc(reason: SegmentDiscardReason) {.gcsafe, raises: [].} =
+    # Undecodable | Invalid | Oversized | Duplicate | CountMismatch
+    metrics.inc(reason),
+  onPayloadReassembled = proc(p: ReassembledPayload) {.gcsafe, raises: [].} =
+    emitMessageReceived(p.originalPayloadHash, p.payload),
+).expect("valid config")
+```
+
+`onPayloadReassembled` fires immediately before `handleIncomingSegment` returns the same
+payload. They are one event reported twice: wire the callback and the returned `Opt` can
+be ignored, which makes reception uniformly event-driven. Acting on both delivers every
+payload twice.
+
+All default to `nil`. The library deliberately has no event system of its own: a drop
+here knows a payload hash and nothing more, while the caller knows the channel and the
+sender, so it is better placed to raise the event.
 
 `err` is reserved for genuine internal faults. Every spec-level discard — an invalid, duplicate,
 out-of-bounds or hash-failing segment — comes back as `ok(Opt.none)`, so callers never have to treat
@@ -85,6 +113,7 @@ segmentation/
   segment_message.nim         # SegmentMessage -- the wire unit, and its validity rules
   segment_message_pb.nim      # SegmentMessagePB -- proto3 mirror and codec
   segment_set.nim             # SegmentSet -- a payload's segments, and its reassembly
+  segment_events.nim          # drop/discard reasons and callback signatures
   segment_cache.nim           # SegmentCache -- set store: dedup, bounds, expiry
                               # (with AddOutcome, its result enum)
   reassembled_payload.nim     # ReassembledPayload -- a reconstructed payload

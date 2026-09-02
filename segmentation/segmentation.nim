@@ -13,6 +13,7 @@
 ## - `reassembled_payload`    -- `ReassembledPayload`, a reconstructed payload
 ## - `segmentation_config`  -- `SegmentationConfig` and its defaults
 ## - `segmentation_handler` -- `SegmentationHandler`, the stateful entry point
+## - `segment_events`       -- drop/discard reasons and the callback signatures
 ## - `parity`               -- Reed-Solomon helpers (no type of its own)
 ##
 ## Public API
@@ -26,7 +27,10 @@
 ## SegmentationConfig.init(segmentSizeBytes, parityRate,
 ##                         reconstructionTimeoutSeconds,
 ##                         maxTotalSegments, maxSegmentSets): SegmentationConfig
-## SegmentationHandler.new(config): Result[SegmentationHandler, string]
+## SegmentationHandler.new(config,
+##                          onSetDropped = nil,
+##                          onSegmentDiscarded = nil,
+##                          onPayloadReassembled = nil): Result[SegmentationHandler, string]
 ## ```
 ##
 ## **Sending**
@@ -42,6 +46,24 @@
 ## ```
 ## `Opt.none` means "not yet, or discarded"; `err` is reserved for internal
 ## faults, never for a segment the spec says to drop.
+##
+## **Events.** Every reception outcome is reported through the callbacks given to
+## `new`, so a consumer can treat reception as uniformly event-driven:
+## ```nim
+## onPayloadReassembled(reassembledPayload)    # a payload completed and verified
+## onSetDropped(originalPayloadHash, reason)   # Expired, Evicted, OverBounds, HashMismatch
+## onSegmentDiscarded(reason)                  # Undecodable, Invalid, Oversized,
+##                                             # Duplicate, CountMismatch
+## ```
+## A dropped set means that payload will never be delivered. All default to `nil`.
+##
+## `onPayloadReassembled` fires immediately before the same payload is returned:
+## they are one event reported twice, so act on the callback or on the returned
+## `Opt`, never both.
+##
+## Nothing sweeps expired sets on its own when traffic stops: run
+## `cleanupSegments` on a timer, or the reconstruction timeout only takes effect
+## on the next arriving segment.
 ##
 ## **Introspection**
 ## ```nim

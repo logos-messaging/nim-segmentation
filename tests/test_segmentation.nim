@@ -1,4 +1,4 @@
-import std/[algorithm, random, sequtils, times]
+import std/[algorithm, os, random, sequtils, times]
 import unittest2, results
 import segmentation, segmentation/segment_cache
 
@@ -346,3 +346,203 @@ suite "round-trip properties":
       check delivered.isSome()
       if delivered.isSome():
         check delivered.get().payload == payload
+
+suite "reception events":
+  proc handlerWithEvents(
+      dropped: ref seq[(seq[byte], SegmentSetDropReason)],
+      discarded: ref seq[SegmentDiscardReason],
+      segmentSizeBytes = 256,
+      parityRate = 0.0,
+      maxTotalSegments = 256,
+      reconstructionTimeoutSeconds = 300,
+  ): SegmentationHandler =
+    return SegmentationHandler
+      .new(
+        SegmentationConfig.init(
+          segmentSizeBytes = segmentSizeBytes,
+          parityRate = parityRate,
+          maxTotalSegments = maxTotalSegments,
+          reconstructionTimeoutSeconds = reconstructionTimeoutSeconds,
+        ),
+        onSetDropped = proc(hash: seq[byte], reason: SegmentSetDropReason) {.gcsafe.} =
+          dropped[].add((hash, reason)),
+        onSegmentDiscarded = proc(reason: SegmentDiscardReason) {.gcsafe.} =
+          discarded[].add(reason),
+      )
+      .expect("valid config")
+
+  test "undecodable bytes are reported":
+    let dropped = new seq[(seq[byte], SegmentSetDropReason)]
+    let discarded = new seq[SegmentDiscardReason]
+    let h = handlerWithEvents(dropped, discarded)
+    check h.handleIncomingSegment(@[0x0A'u8, 0x7F]).get().isNone()
+    check discarded[] == @[SegmentDiscardReason.Undecodable]
+
+  test "an invalid segment is reported":
+    let dropped = new seq[(seq[byte], SegmentSetDropReason)]
+    let discarded = new seq[SegmentDiscardReason]
+    let h = handlerWithEvents(dropped, discarded)
+    var m = SegmentMessage.decode(h.performSegmentation(payloadOf(10)).get()[0]).get()
+    m.originalPayloadHash.setLen(31)
+    check h.handleIncomingSegment(m.encode().get()).get().isNone()
+    check discarded[] == @[SegmentDiscardReason.Invalid]
+
+  test "a duplicate segment is reported":
+    let dropped = new seq[(seq[byte], SegmentSetDropReason)]
+    let discarded = new seq[SegmentDiscardReason]
+    let h = handlerWithEvents(dropped, discarded)
+    let segments = h.performSegmentation(payloadOf(1000)).get()
+    check h.handleIncomingSegment(segments[0]).get().isNone()
+    check discarded[].len == 0
+    check h.handleIncomingSegment(segments[0]).get().isNone()
+    check discarded[] == @[SegmentDiscardReason.Duplicate]
+
+  test "a set that fails its hash check reports HashMismatch with the hash":
+    let dropped = new seq[(seq[byte], SegmentSetDropReason)]
+    let discarded = new seq[SegmentDiscardReason]
+    let h = handlerWithEvents(dropped, discarded)
+    let payload = payloadOf(1000)
+    let segments = mkHandler().performSegmentation(payload).get()
+    let expectedHash = SegmentMessage.decode(segments[0]).get().originalPayloadHash
+
+    var tampered = segments
+    var m = SegmentMessage.decode(segments[2]).get()
+    m.segmentPayload[0] = m.segmentPayload[0] xor 0xFF'u8
+    tampered[2] = m.encode().get()
+
+    check h.feed(tampered).isNone()
+    check dropped[].len == 1
+    check dropped[][0][0] == expectedHash
+    check dropped[][0][1] == SegmentSetDropReason.HashMismatch
+    check h.pendingSets() == 0
+
+  test "an expired set reports Expired when swept":
+    let dropped = new seq[(seq[byte], SegmentSetDropReason)]
+    let discarded = new seq[SegmentDiscardReason]
+    let h = handlerWithEvents(dropped, discarded, reconstructionTimeoutSeconds = 1)
+    let segments = mkHandler().performSegmentation(payloadOf(1000)).get()
+    check h.feed(segments[0 ..< 3]).isNone()
+    check h.pendingSets() == 1
+    check dropped[].len == 0
+
+    sleep(1100)
+    h.cleanupSegments()
+    check h.pendingSets() == 0
+    check dropped[].len == 1
+    check dropped[][0][1] == SegmentSetDropReason.Expired
+
+  test "eviction reports Evicted":
+    let dropped = new seq[(seq[byte], SegmentSetDropReason)]
+    let discarded = new seq[SegmentDiscardReason]
+    let h = SegmentationHandler
+      .new(
+        SegmentationConfig.init(segmentSizeBytes = 256, maxSegmentSets = 1),
+        onSetDropped = proc(hash: seq[byte], reason: SegmentSetDropReason) {.gcsafe.} =
+          dropped[].add((hash, reason)),
+      )
+      .expect("valid config")
+
+    let first = mkHandler().performSegmentation(payloadOf(1000)).get()
+    let second = mkHandler().performSegmentation(payloadOf(2000)).get()
+    check h.feed(first[0 ..< 2]).isNone()
+    check h.feed(second[0 ..< 2]).isNone()
+
+    check dropped[].len == 1
+    check dropped[][0][1] == SegmentSetDropReason.Evicted
+    check h.pendingSets() == 1
+
+  test "callbacks default to nil and are simply not called":
+    let h = mkHandler()
+    check h.handleIncomingSegment(@[0x0A'u8, 0x7F]).get().isNone()
+    check h.feed(mkHandler().performSegmentation(payloadOf(1000)).get()).isSome()
+
+  test "a set exceeding maxTotalSegments reports OverBounds":
+    let dropped = new seq[(seq[byte], SegmentSetDropReason)]
+    let discarded = new seq[SegmentDiscardReason]
+    let h = handlerWithEvents(dropped, discarded, maxTotalSegments = 4)
+
+    var hash = newSeq[byte](SegmentHashLen)
+    hash[0] = 7
+    # Each is individually valid (segmentCount <= 4), but 3 data + 3 parity is 6.
+    let data = SegmentMessage.init(
+      originalPayloadHash = hash,
+      originalPayloadLength = 300,
+      index = 0,
+      segmentCount = 3,
+      isParity = false,
+      segmentPayload = @[1'u8],
+    )
+    let parity = SegmentMessage.init(
+      originalPayloadHash = hash,
+      originalPayloadLength = 300,
+      index = 0,
+      segmentCount = 3,
+      isParity = true,
+      segmentPayload = @[2'u8],
+    )
+    check h.handleIncomingSegment(data.encode().get()).get().isNone()
+    check dropped[].len == 0
+    check h.handleIncomingSegment(parity.encode().get()).get().isNone()
+
+    check dropped[].len == 1
+    check dropped[][0][0] == hash
+    check dropped[][0][1] == SegmentSetDropReason.OverBounds
+    check h.pendingSets() == 0
+
+  test "a completed payload is reported once, with its hash":
+    let reassembled = new seq[ReassembledPayload]
+    let payload = payloadOf(1000)
+    let segments = mkHandler().performSegmentation(payload).get()
+    let expectedHash = SegmentMessage.decode(segments[0]).get().originalPayloadHash
+
+    let h = SegmentationHandler
+      .new(
+        SegmentationConfig.init(segmentSizeBytes = 256),
+        onPayloadReassembled = proc(p: ReassembledPayload) {.gcsafe.} =
+          reassembled[].add(p),
+      )
+      .expect("valid config")
+
+    let delivered = h.feed(segments)
+    check delivered.isSome()
+    check reassembled[].len == 1
+    check reassembled[][0].payload == payload
+    check reassembled[][0].originalPayloadHash == expectedHash
+    # The callback and the return value are one event, not two.
+    check reassembled[][0].payload == delivered.get().payload
+
+  test "a set that never completes reports nothing":
+    let reassembled = new seq[ReassembledPayload]
+    let h = SegmentationHandler
+      .new(
+        SegmentationConfig.init(segmentSizeBytes = 256),
+        onPayloadReassembled = proc(p: ReassembledPayload) {.gcsafe.} =
+          reassembled[].add(p),
+      )
+      .expect("valid config")
+    let segments = mkHandler().performSegmentation(payloadOf(1000)).get()
+    check h.feed(segments[0 ..< segments.len - 1]).isNone()
+    check reassembled[].len == 0
+
+  test "a corrupted set reports the drop, never the payload":
+    let reassembled = new seq[ReassembledPayload]
+    let dropped = new seq[(seq[byte], SegmentSetDropReason)]
+    let h = SegmentationHandler
+      .new(
+        SegmentationConfig.init(segmentSizeBytes = 256),
+        onSetDropped = proc(hash: seq[byte], reason: SegmentSetDropReason) {.gcsafe.} =
+          dropped[].add((hash, reason)),
+        onPayloadReassembled = proc(p: ReassembledPayload) {.gcsafe.} =
+          reassembled[].add(p),
+      )
+      .expect("valid config")
+
+    var segments = mkHandler().performSegmentation(payloadOf(1000)).get()
+    var m = SegmentMessage.decode(segments[2]).get()
+    m.segmentPayload[0] = m.segmentPayload[0] xor 0xFF'u8
+    segments[2] = m.encode().get()
+
+    check h.feed(segments).isNone()
+    check reassembled[].len == 0
+    check dropped[].len == 1
+    check dropped[][0][1] == SegmentSetDropReason.HashMismatch

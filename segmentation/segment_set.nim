@@ -12,14 +12,27 @@ import ./parity
 export monotimes, tables, results
 
 type SegmentSet* = ref object
+  ## Carries the identity it was filed under, so a set can name its payload when
+  ## it is delivered or abandoned.
+  originalPayloadHash*: seq[byte]
+  originalPayloadLength*: uint64
   dataCount*: Opt[uint32]
   parityCount*: Opt[uint32]
   data*: Table[uint32, seq[byte]]
   parity*: Table[uint32, seq[byte]]
   lastUpdate*: MonoTime
 
-func new*(T: type SegmentSet, now: MonoTime): T =
+func new*(
+    T: type SegmentSet,
+    originalPayloadHash: seq[byte],
+    originalPayloadLength: uint64,
+    now: MonoTime,
+): T =
+  ## Identity comes from the first segment filed here; every later segment of the
+  ## set carries the same pair, which is what `segmentSetKey` keys on.
   return T(
+    originalPayloadHash: originalPayloadHash,
+    originalPayloadLength: originalPayloadLength,
     data: initTable[uint32, seq[byte]](),
     parity: initTable[uint32, seq[byte]](),
     lastUpdate: now,
@@ -101,10 +114,10 @@ proc recoverThroughParity(
     assembled.add(shard)
   return ok(Opt.some(assembled))
 
-proc assemble*(
-    self: SegmentSet, hash: seq[byte], payloadLen: int
-): Result[Opt[seq[byte]], string] =
-  ## `ok(none)` means "not yet"; `err` means the set is unusable and is dropped.
+proc assemble*(self: SegmentSet): Result[Opt[seq[byte]], string] =
+  ## Rebuild the original payload. `ok(none)` means "not yet"; `err` means the
+  ## set is unusable and is dropped.
+  let payloadLen = int(self.originalPayloadLength)
   let dataClassCount = self.dataCount.valueOr:
     return ok(Opt.none(seq[byte]))
   let dataCount = int(dataClassCount)
@@ -131,7 +144,7 @@ proc assemble*(
     )
   assembled.setLen(payloadLen)
 
-  if @(keccak256.digest(assembled).data) != hash:
+  if @(keccak256.digest(assembled).data) != self.originalPayloadHash:
     return err(
       "segment_set.assemble: reconstructed payload does not match the declared hash"
     )
