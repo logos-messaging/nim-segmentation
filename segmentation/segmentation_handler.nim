@@ -24,12 +24,17 @@ static:
   doAssert alignShardLen(MinSegmentSizeBytes - SegmentHeaderMaxBytes) >= ShardAlignment
 
 type SegmentationHandler* = ref object
+  ## Segments outgoing payloads and reassembles incoming ones. Holds the
+  ## partially received sets, so one instance is needed per peer-facing channel.
   config: SegmentationConfig
   scaledParityRate: int
   chunkSize: int
   cache: SegmentCache
 
 proc new*(T: type SegmentationHandler, config: SegmentationConfig): Result[T, string] =
+  ## Validate `config` and derive the chunk size from it. Fails rather than
+  ## clamping, so a misconfiguration surfaces at construction and not on the
+  ## first send.
   if config.segmentSizeBytes < MinSegmentSizeBytes:
     return err(
       "segmentation_handler.new: segmentSizeBytes below the minimum: " &
@@ -73,9 +78,12 @@ proc new*(T: type SegmentationHandler, config: SegmentationConfig): Result[T, st
   )
 
 func chunkSize*(self: SegmentationHandler): int =
+  ## Payload bytes carried by one data segment: `segmentSizeBytes` less the wire
+  ## header, rounded down to a multiple of `ShardAlignment`.
   return self.chunkSize
 
 func pendingSets*(self: SegmentationHandler): int =
+  ## Segment sets currently held incomplete. Mainly for tests and metrics.
   return self.cache.len
 
 proc performSegmentation*(

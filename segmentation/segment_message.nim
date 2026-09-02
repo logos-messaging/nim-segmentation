@@ -26,7 +26,7 @@ export results
 const SegmentHashLen* = 32
   ## Keccak256 digest length, the only accepted `originalPayloadHash` length.
 
-type SegmentMessage* = object
+type SegmentMessage* = object ## One segment of a payload, data or parity.
   originalPayloadHash*: seq[byte]
   originalPayloadLength*: uint64
   index*: uint32
@@ -107,6 +107,8 @@ func isValid*(self: SegmentMessage, maxTotalSegments: int): bool =
   return true
 
 proc encode*(self: SegmentMessage): Result[seq[byte], string] =
+  ## Serialize to the proto3 wire format. The caller sends the result as one
+  ## transport message.
   try:
     return ok(Protobuf.encode(self.toPB()))
   except CatchableError as e:
@@ -119,6 +121,8 @@ proc decodeBytes(data: seq[byte]): Result[SegmentMessage, string] =
     return err("segment_message.decode: protobuf decoding failed: " & e.msg)
 
 proc decode*(T: type SegmentMessage, data: seq[byte]): Result[SegmentMessage, string] =
+  ## Parse one received segment message. Succeeding says only that the bytes were
+  ## well-formed protobuf; call `isValid` before trusting the fields.
   # Delegates to a concrete proc: this one is generic over `T`, so instantiating
   # `Protobuf.decode` here would resolve its `mixin Reader` at the call site,
   # which need not import protobuf_serialization.

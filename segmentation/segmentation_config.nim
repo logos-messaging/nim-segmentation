@@ -7,10 +7,19 @@
 
 const
   DefaultSegmentSizeBytes* = 102_400
-  DefaultParityRate* = 0.0
+    ## Fits the 150 KiB cap of Logos Delivery with room to spare.
+
+  DefaultParityRate* = 0.0 ## Parity off, as the spec defaults it.
+
   DefaultReconstructionTimeoutSeconds* = 300
+    ## How long a set may go without a new segment before it is dropped.
+
   DefaultMaxTotalSegments* = 256
+    ## The spec's RECOMMENDED value, and Leopard-RS' 8-bit field ceiling.
+
   DefaultMaxSegmentSets* = 100
+    ## Concurrent partial sets retained; bounds what one sender can make a
+    ## receiver buffer.
 
   SegmentHeaderMaxBytes* = 64
     ## Upper bound on everything a serialized `SegmentMessage` carries besides
@@ -22,7 +31,7 @@ const
 
   MaxSupportedTotalSegments* = 65_536 ## leopard rejects `buffers + parity` above this.
 
-type SegmentationConfig* = object
+type SegmentationConfig* = object ## Tunables for a `SegmentationHandler`.
   segmentSizeBytes*: int
   parityRate*: float
   reconstructionTimeoutSeconds*: int
@@ -37,6 +46,8 @@ func init*(
     maxTotalSegments: int = DefaultMaxTotalSegments,
     maxSegmentSets: int = DefaultMaxSegmentSets,
 ): T =
+  ## Every field defaults, so a caller names only what it wants to change.
+  ## Validation happens in `SegmentationHandler.new`, not here.
   return T(
     segmentSizeBytes: segmentSizeBytes,
     parityRate: parityRate,

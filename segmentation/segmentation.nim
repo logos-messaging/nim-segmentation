@@ -15,6 +15,54 @@
 ## - `segmentation_handler` -- `SegmentationHandler`, the stateful entry point
 ## - `parity`               -- Reed-Solomon helpers (no type of its own)
 ##
+## Public API
+## -----------
+##
+## Everything below is reachable from `import segmentation`; anything not listed
+## is internal and may change without notice.
+##
+## **Setup**
+## ```nim
+## SegmentationConfig.init(segmentSizeBytes, parityRate,
+##                         reconstructionTimeoutSeconds,
+##                         maxTotalSegments, maxSegmentSets): SegmentationConfig
+## SegmentationHandler.new(config): Result[SegmentationHandler, string]
+## ```
+##
+## **Sending**
+## ```nim
+## handler.performSegmentation(payload): Result[seq[seq[byte]], string]
+## ```
+## Each element is one transport message.
+##
+## **Receiving**
+## ```nim
+## handler.handleIncomingSegment(bytes): Result[Opt[ReassembledPayload], string]
+## handler.cleanupSegments()
+## ```
+## `Opt.none` means "not yet, or discarded"; `err` is reserved for internal
+## faults, never for a segment the spec says to drop.
+##
+## **Introspection**
+## ```nim
+## handler.chunkSize(): int
+## handler.pendingSets(): int
+## ```
+##
+## **Wire unit**, for callers that inspect segments directly:
+## ```nim
+## SegmentMessage.init(...): SegmentMessage
+## SegmentMessage.decode(bytes): Result[SegmentMessage, string]
+## message.encode(): Result[seq[byte], string]
+## message.isValid(maxTotalSegments): bool
+## message.segmentSetKey(): string
+## ```
+##
+## **Types**: `SegmentationHandler`, `SegmentationConfig`, `SegmentMessage`,
+## `ReassembledPayload`.
+## **Constants**: `Default*` config values, `SegmentHashLen`,
+## `SegmentHeaderMaxBytes`, `MinSegmentSizeBytes`, `MaxSupportedTotalSegments`.
+##
 ## Spec: https://github.com/logos-co/logos-lips -- messaging/application/raw/segmentation.md
 import
   ./segmentation_handler,
