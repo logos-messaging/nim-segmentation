@@ -46,27 +46,65 @@ type
     isParity {.fieldNumber: 5.}: bool
     segmentPayload {.fieldNumber: 6.}: seq[byte]
 
+func init*(
+    T: type SegmentMessage,
+    originalPayloadHash: seq[byte],
+    originalPayloadLength: uint64,
+    index: uint32,
+    segmentCount: uint32,
+    isParity: bool,
+    segmentPayload: seq[byte],
+): T =
+  ## Every field is mandatory, so none is defaulted. The parameter order follows
+  ## the spec's field numbering.
+  return T(
+    originalPayloadHash: originalPayloadHash,
+    originalPayloadLength: originalPayloadLength,
+    index: index,
+    segmentCount: segmentCount,
+    isParity: isParity,
+    segmentPayload: segmentPayload,
+  )
+
+func init(
+    T: type SegmentMessagePB,
+    originalPayloadHash: seq[byte],
+    originalPayloadLength: uint64,
+    index: uint64,
+    segmentCount: uint64,
+    isParity: bool,
+    segmentPayload: seq[byte],
+): T =
+  return T(
+    originalPayloadHash: originalPayloadHash,
+    originalPayloadLength: originalPayloadLength,
+    index: index,
+    segmentCount: segmentCount,
+    isParity: isParity,
+    segmentPayload: segmentPayload,
+  )
+
 func toPB(m: SegmentMessage): SegmentMessagePB =
-  return SegmentMessagePB(
-    originalPayloadHash: m.originalPayloadHash,
-    originalPayloadLength: m.originalPayloadLength,
-    index: uint64(m.index),
-    segmentCount: uint64(m.segmentCount),
-    isParity: m.isParity,
-    segmentPayload: m.segmentPayload,
+  return SegmentMessagePB.init(
+    originalPayloadHash = m.originalPayloadHash,
+    originalPayloadLength = m.originalPayloadLength,
+    index = uint64(m.index),
+    segmentCount = uint64(m.segmentCount),
+    isParity = m.isParity,
+    segmentPayload = m.segmentPayload,
   )
 
 func fromPB(pb: SegmentMessagePB): SegmentMessage =
   # Clamp rather than convert: the narrowing would wrap, and a wrapped count can
   # land back inside the valid range. Clamping keeps it out of range so that
   # `isValid` rejects it.
-  return SegmentMessage(
-    originalPayloadHash: pb.originalPayloadHash,
-    originalPayloadLength: pb.originalPayloadLength,
-    index: uint32(min(pb.index, uint64(uint32.high))),
-    segmentCount: uint32(min(pb.segmentCount, uint64(uint32.high))),
-    isParity: pb.isParity,
-    segmentPayload: pb.segmentPayload,
+  return SegmentMessage.init(
+    originalPayloadHash = pb.originalPayloadHash,
+    originalPayloadLength = pb.originalPayloadLength,
+    index = uint32(min(pb.index, uint64(uint32.high))),
+    segmentCount = uint32(min(pb.segmentCount, uint64(uint32.high))),
+    isParity = pb.isParity,
+    segmentPayload = pb.segmentPayload,
   )
 
 func isValid*(m: SegmentMessage, maxTotalSegments: int): bool =

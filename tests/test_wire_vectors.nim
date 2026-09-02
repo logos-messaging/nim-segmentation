@@ -34,37 +34,37 @@ let testHash = bytes(hashHex)
 
 suite "wire vectors":
   test "data segment":
-    let m = SegmentMessage(
-      originalPayloadHash: testHash,
-      originalPayloadLength: 500'u64,
-      index: 1'u32,
-      segmentCount: 3'u32,
-      isParity: false,
-      segmentPayload: @[0xAA'u8, 0xBB, 0xCC],
+    let m = SegmentMessage.init(
+      originalPayloadHash = testHash,
+      originalPayloadLength = 500'u64,
+      index = 1'u32,
+      segmentCount = 3'u32,
+      isParity = false,
+      segmentPayload = @[0xAA'u8, 0xBB, 0xCC],
     )
     check m.encode().get() == bytes(dataHex)
     check SegmentMessage.decode(bytes(dataHex)).get() == m
 
   test "parity segment":
-    let m = SegmentMessage(
-      originalPayloadHash: testHash,
-      originalPayloadLength: 500'u64,
-      index: 0'u32,
-      segmentCount: 1'u32,
-      isParity: true,
-      segmentPayload: @[0x11'u8, 0x22],
+    let m = SegmentMessage.init(
+      originalPayloadHash = testHash,
+      originalPayloadLength = 500'u64,
+      index = 0'u32,
+      segmentCount = 1'u32,
+      isParity = true,
+      segmentPayload = @[0x11'u8, 0x22],
     )
     check m.encode().get() == bytes(parityHex)
     check SegmentMessage.decode(bytes(parityHex)).get() == m
 
   test "all-default segment":
-    let m = SegmentMessage(
-      originalPayloadHash: testHash,
-      originalPayloadLength: 0'u64,
-      index: 0'u32,
-      segmentCount: 1'u32,
-      isParity: false,
-      segmentPayload: @[],
+    let m = SegmentMessage.init(
+      originalPayloadHash = testHash,
+      originalPayloadLength = 0'u64,
+      index = 0'u32,
+      segmentCount = 1'u32,
+      isParity = false,
+      segmentPayload = @[],
     )
     check m.encode().get() == bytes(minimalHex)
     check SegmentMessage.decode(bytes(minimalHex)).get() == m

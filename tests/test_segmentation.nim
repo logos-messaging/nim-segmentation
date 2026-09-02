@@ -266,13 +266,13 @@ suite "segment cache bounds and expiry":
   proc segmentFor(hashByte: byte, index, count: uint32): SegmentMessage =
     var h = newSeq[byte](SegmentHashLen)
     h[0] = hashByte
-    return SegmentMessage(
-      originalPayloadHash: h,
-      originalPayloadLength: 100'u64,
-      index: index,
-      segmentCount: count,
-      isParity: false,
-      segmentPayload: @[1'u8],
+    return SegmentMessage.init(
+      originalPayloadHash = h,
+      originalPayloadLength = 100'u64,
+      index = index,
+      segmentCount = count,
+      isParity = false,
+      segmentPayload = @[1'u8],
     )
 
   test "a set idle past the timeout is dropped":

@@ -10,13 +10,13 @@ const testHash = block:
 
 suite "segment message wire format":
   test "data segment round-trips":
-    let m = SegmentMessage(
-      originalPayloadHash: testHash,
-      originalPayloadLength: 1234'u64,
-      index: 2'u32,
-      segmentCount: 5'u32,
-      isParity: false,
-      segmentPayload: @[1'u8, 2, 3],
+    let m = SegmentMessage.init(
+      originalPayloadHash = testHash,
+      originalPayloadLength = 1234'u64,
+      index = 2'u32,
+      segmentCount = 5'u32,
+      isParity = false,
+      segmentPayload = @[1'u8, 2, 3],
     )
     let encoded = m.encode()
     check encoded.isOk()
@@ -25,13 +25,13 @@ suite "segment message wire format":
     check back.get() == m
 
   test "parity segment round-trips":
-    let m = SegmentMessage(
-      originalPayloadHash: testHash,
-      originalPayloadLength: 9'u64,
-      index: 0'u32,
-      segmentCount: 3'u32,
-      isParity: true,
-      segmentPayload: @[9'u8, 9, 9, 9],
+    let m = SegmentMessage.init(
+      originalPayloadHash = testHash,
+      originalPayloadLength = 9'u64,
+      index = 0'u32,
+      segmentCount = 3'u32,
+      isParity = true,
+      segmentPayload = @[9'u8, 9, 9, 9],
     )
     let back = SegmentMessage.decode(m.encode().get())
     check back.isOk()
@@ -40,13 +40,13 @@ suite "segment message wire format":
   test "proto3 defaults omitted on the wire still decode":
     # index 0, is_parity false and an empty payload are all proto3 defaults, so
     # a conforming encoder leaves them off entirely.
-    let m = SegmentMessage(
-      originalPayloadHash: testHash,
-      originalPayloadLength: 0'u64,
-      index: 0'u32,
-      segmentCount: 1'u32,
-      isParity: false,
-      segmentPayload: @[],
+    let m = SegmentMessage.init(
+      originalPayloadHash = testHash,
+      originalPayloadLength = 0'u64,
+      index = 0'u32,
+      segmentCount = 1'u32,
+      isParity = false,
+      segmentPayload = @[],
     )
     let encoded = m.encode().get()
     # hash (34 bytes) + segment_count (2 bytes); nothing else is on the wire.
@@ -56,13 +56,13 @@ suite "segment message wire format":
     check back.get() == m
 
   test "unknown fields are ignored":
-    let m = SegmentMessage(
-      originalPayloadHash: testHash,
-      originalPayloadLength: 8'u64,
-      index: 1'u32,
-      segmentCount: 2'u32,
-      isParity: false,
-      segmentPayload: @[7'u8],
+    let m = SegmentMessage.init(
+      originalPayloadHash = testHash,
+      originalPayloadLength = 8'u64,
+      index = 1'u32,
+      segmentCount = 2'u32,
+      isParity = false,
+      segmentPayload = @[7'u8],
     )
     var extended = m.encode().get()
     # A future field 7, varint-encoded: tag (7 shl 3) or 0, then the value.
@@ -97,13 +97,13 @@ suite "segment message validity":
   const maxTotal = 256
 
   proc valid(): SegmentMessage =
-    return SegmentMessage(
-      originalPayloadHash: testHash,
-      originalPayloadLength: 10'u64,
-      index: 0'u32,
-      segmentCount: 2'u32,
-      isParity: false,
-      segmentPayload: @[1'u8],
+    return SegmentMessage.init(
+      originalPayloadHash = testHash,
+      originalPayloadLength = 10'u64,
+      index = 0'u32,
+      segmentCount = 2'u32,
+      isParity = false,
+      segmentPayload = @[1'u8],
     )
 
   test "a well-formed segment is valid":
@@ -146,13 +146,13 @@ suite "header budget":
     # The constant that chunk sizing subtracts must bound every non-payload
     # byte, at the largest values each field can take.
     for payloadLen in [0, 1, 64, 200, 100_000, 3_000_000]:
-      let m = SegmentMessage(
-        originalPayloadHash: testHash,
-        originalPayloadLength: uint64(uint32.high),
-        index: uint32.high - 1,
-        segmentCount: uint32.high,
-        isParity: true,
-        segmentPayload: newSeq[byte](payloadLen),
+      let m = SegmentMessage.init(
+        originalPayloadHash = testHash,
+        originalPayloadLength = uint64(uint32.high),
+        index = uint32.high - 1,
+        segmentCount = uint32.high,
+        isParity = true,
+        segmentPayload = newSeq[byte](payloadLen),
       )
       let encoded = m.encode().get()
       check encoded.len - payloadLen <= SegmentHeaderMaxBytes

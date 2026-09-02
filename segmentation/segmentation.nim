@@ -58,6 +58,11 @@ type
     originalPayloadHash*: seq[byte]
 
 func init*(
+    T: type ReassemblyResult, payload: seq[byte], originalPayloadHash: seq[byte]
+): T =
+  return T(payload: payload, originalPayloadHash: originalPayloadHash)
+
+func init*(
     T: type SegmentationConfig,
     segmentSizeBytes: int = DefaultSegmentSizeBytes,
     parityRate: float = DefaultParityRate,
@@ -164,14 +169,16 @@ proc performSegmentation*(
         newSeq[byte]()
 
     segments.add(
-      ?SegmentMessage(
-        originalPayloadHash: hash,
-        originalPayloadLength: uint64(payload.len),
-        index: uint32(i),
-        segmentCount: uint32(dataCount),
-        isParity: false,
-        segmentPayload: chunk,
-      ).encode()
+      ?SegmentMessage
+        .init(
+          originalPayloadHash = hash,
+          originalPayloadLength = uint64(payload.len),
+          index = uint32(i),
+          segmentCount = uint32(dataCount),
+          isParity = false,
+          segmentPayload = chunk,
+        )
+        .encode()
     )
 
     # Data segments go on the wire at their true length; only the encoder sees
@@ -183,14 +190,16 @@ proc performSegmentation*(
     let parityShards = ?encodeParity(dataShards, parityCount, self.chunkSize)
     for i, shard in parityShards:
       segments.add(
-        ?SegmentMessage(
-          originalPayloadHash: hash,
-          originalPayloadLength: uint64(payload.len),
-          index: uint32(i),
-          segmentCount: uint32(parityCount),
-          isParity: true,
-          segmentPayload: shard,
-        ).encode()
+        ?SegmentMessage
+          .init(
+            originalPayloadHash = hash,
+            originalPayloadLength = uint64(payload.len),
+            index = uint32(i),
+            segmentCount = uint32(parityCount),
+            isParity = true,
+            segmentPayload = shard,
+          )
+          .encode()
       )
 
   return ok(segments)
@@ -335,7 +344,9 @@ proc handleIncomingSegment*(
   self.cache.remove(key)
   return ok(
     Opt.some(
-      ReassemblyResult(payload: payload, originalPayloadHash: m.originalPayloadHash)
+      ReassemblyResult.init(
+        payload = payload, originalPayloadHash = m.originalPayloadHash
+      )
     )
   )
 
