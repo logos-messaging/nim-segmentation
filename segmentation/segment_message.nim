@@ -1,5 +1,4 @@
-## Wire format for a single segment, per LIP-243 "Message Segmentation and
-## Reconstruction".
+## A single segment, per LIP-243 "Message Segmentation and Reconstruction".
 ##
 ## ```protobuf
 ## message SegmentMessage {
@@ -22,29 +21,20 @@
 
 import results
 import protobuf_serialization
+import ./segment_message_pb
+
+export results, segment_message_pb
 
 const SegmentHashLen* = 32
   ## Keccak256 digest length, the only accepted `originalPayloadHash` length.
 
-type
-  SegmentMessage* = object
-    originalPayloadHash*: seq[byte]
-    originalPayloadLength*: uint64
-    index*: uint32
-    segmentCount*: uint32
-    isParity*: bool
-    segmentPayload*: seq[byte]
-
-  # Mirrors the spec's declaration field for field, except that the counts are
-  # widened: decoding an out-of-range varint straight into `uint32` truncates it
-  # silently, and `uint32(2^32 + 5)` is 5, which `isValid` would wave through.
-  SegmentMessagePB {.proto3.} = object
-    originalPayloadHash {.fieldNumber: 1.}: seq[byte]
-    originalPayloadLength {.fieldNumber: 2, pint.}: uint64
-    index {.fieldNumber: 3, pint.}: uint64
-    segmentCount {.fieldNumber: 4, pint.}: uint64
-    isParity {.fieldNumber: 5.}: bool
-    segmentPayload {.fieldNumber: 6.}: seq[byte]
+type SegmentMessage* = object
+  originalPayloadHash*: seq[byte]
+  originalPayloadLength*: uint64
+  index*: uint32
+  segmentCount*: uint32
+  isParity*: bool
+  segmentPayload*: seq[byte]
 
 func init*(
     T: type SegmentMessage,
@@ -66,39 +56,13 @@ func init*(
     segmentPayload: segmentPayload,
   )
 
-func init(
-    T: type SegmentMessagePB,
-    originalPayloadHash: seq[byte],
-    originalPayloadLength: uint64,
-    index: uint64,
-    segmentCount: uint64,
-    isParity: bool,
-    segmentPayload: seq[byte],
-): T =
-  return T(
-    originalPayloadHash: originalPayloadHash,
-    originalPayloadLength: originalPayloadLength,
-    index: index,
-    segmentCount: segmentCount,
-    isParity: isParity,
-    segmentPayload: segmentPayload,
-  )
-
-func toPB(m: SegmentMessage): SegmentMessagePB =
-  return SegmentMessagePB.init(
-    originalPayloadHash = m.originalPayloadHash,
-    originalPayloadLength = m.originalPayloadLength,
-    index = uint64(m.index),
-    segmentCount = uint64(m.segmentCount),
-    isParity = m.isParity,
-    segmentPayload = m.segmentPayload,
-  )
-
-func fromPB(pb: SegmentMessagePB): SegmentMessage =
-  # Clamp rather than convert: the narrowing would wrap, and a wrapped count can
-  # land back inside the valid range. Clamping keeps it out of range so that
-  # `isValid` rejects it.
-  return SegmentMessage.init(
+func init*(T: type SegmentMessage, pb: SegmentMessagePB): T =
+  ## Narrow the mirror's widened counts back to the spec's `uint32`.
+  ##
+  ## Clamp rather than convert: the narrowing would wrap, and a wrapped count can
+  ## land back inside the valid range. Clamping keeps it out of range so that
+  ## `isValid` rejects it.
+  return T.init(
     originalPayloadHash = pb.originalPayloadHash,
     originalPayloadLength = pb.originalPayloadLength,
     index = uint32(min(pb.index, uint64(uint32.high))),
@@ -107,25 +71,52 @@ func fromPB(pb: SegmentMessagePB): SegmentMessage =
     segmentPayload = pb.segmentPayload,
   )
 
-func isValid*(m: SegmentMessage, maxTotalSegments: int): bool =
+func toPB*(self: SegmentMessage): SegmentMessagePB =
+  return SegmentMessagePB.init(
+    originalPayloadHash = self.originalPayloadHash,
+    originalPayloadLength = self.originalPayloadLength,
+    index = uint64(self.index),
+    segmentCount = uint64(self.segmentCount),
+    isParity = self.isParity,
+    segmentPayload = self.segmentPayload,
+  )
+
+func segmentSetKey*(self: SegmentMessage): string =
+  ## Identity of the segment set this message belongs to: the spec groups two
+  ## messages together only when their `original_payload_hash` and
+  ## `original_payload_length` both match. Encoded as the 32 hash bytes followed
+  ## by the length, little-endian.
+  ##
+  ## `segment_count` is deliberately absent -- it counts one class, so including
+  ## it would file a payload's data and parity segments under two identities.
+  var key = newString(self.originalPayloadHash.len + 8)
+  for i, b in self.originalPayloadHash:
+    key[i] = char(b)
+  var n = self.originalPayloadLength
+  for i in 0 ..< 8:
+    key[self.originalPayloadHash.len + i] = char(byte(n and 0xFF'u64))
+    n = n shr 8
+  return key
+
+func isValid*(self: SegmentMessage, maxTotalSegments: int): bool =
   ## The spec's three validity rules. An invalid segment message is discarded.
-  if m.originalPayloadHash.len != SegmentHashLen:
+  if self.originalPayloadHash.len != SegmentHashLen:
     return false
-  if m.segmentCount < 1'u32 or m.segmentCount > uint32(maxTotalSegments):
+  if self.segmentCount < 1'u32 or self.segmentCount > uint32(maxTotalSegments):
     return false
-  if m.index >= m.segmentCount:
+  if self.index >= self.segmentCount:
     return false
   return true
 
-proc encode*(m: SegmentMessage): Result[seq[byte], string] =
+proc encode*(self: SegmentMessage): Result[seq[byte], string] =
   try:
-    return ok(Protobuf.encode(m.toPB()))
+    return ok(Protobuf.encode(self.toPB()))
   except CatchableError as e:
     return err("segment_message.encode: protobuf encoding failed: " & e.msg)
 
 proc decodeBytes(data: seq[byte]): Result[SegmentMessage, string] =
   try:
-    return ok(Protobuf.decode(data, SegmentMessagePB).fromPB())
+    return ok(SegmentMessage.init(Protobuf.decode(data, SegmentMessagePB)))
   except CatchableError as e:
     return err("segment_message.decode: protobuf decoding failed: " & e.msg)
 

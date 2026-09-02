@@ -77,13 +77,25 @@ Because the segment bound is on the **sum** of both classes, the usable data-chu
 
 ## Layout
 
+One type per module; `segmentation.nim` is the entry point and re-exports the public surface.
+
 ```
 segmentation/
-  segmentation.nim      # public API
-  segment_message.nim   # wire codec and validity rules
-  reassembly.nim        # segment-set cache: dedup, bounds, expiry
-  parity.nim            # Reed-Solomon via nim-leopard
+  segmentation.nim            # package entry point, no code of its own
+  segment_message.nim         # SegmentMessage -- the wire unit, and its validity rules
+  segment_message_pb.nim      # SegmentMessagePB -- proto3 mirror and codec
+  segment_set.nim             # SegmentSet -- a payload's segments, and its reassembly
+  segment_cache.nim           # SegmentCache -- set store: dedup, bounds, expiry
+                              # (with AddOutcome, its result enum)
+  reassembled_payload.nim     # ReassembledPayload -- a reconstructed payload
+  segmentation_config.nim     # SegmentationConfig and its defaults
+  segmentation_handler.nim    # SegmentationHandler -- the stateful entry point
+  parity.nim                  # Reed-Solomon helpers (no type of its own)
 ```
+
+A type's operations live in its own module, so private fields stay private:
+`SegmentCache.sets` and the handler's internals are reachable only from the module
+that declares them.
 
 ## Dependencies
 

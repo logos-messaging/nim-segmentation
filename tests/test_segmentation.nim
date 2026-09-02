@@ -2,7 +2,7 @@ import std/[algorithm, random, sequtils, times]
 import unittest2
 import results
 import segmentation
-import segmentation/reassembly
+import segmentation/segment_cache
 
 proc mkHandler(
     segmentSizeBytes = 256, parityRate = 0.0, maxTotalSegments = 256
@@ -23,9 +23,9 @@ proc payloadOf(n: int): seq[byte] =
     p[i] = byte((i * 37 + 11) and 0xFF)
   return p
 
-proc feed(h: SegmentationHandler, segments: seq[seq[byte]]): Opt[ReassemblyResult] =
+proc feed(h: SegmentationHandler, segments: seq[seq[byte]]): Opt[ReassembledPayload] =
   ## Feed every segment, returning the first successful reassembly.
-  var delivered = Opt.none(ReassemblyResult)
+  var delivered = Opt.none(ReassembledPayload)
   for s in segments:
     let r = h.handleIncomingSegment(s).expect("no internal fault")
     if r.isSome() and delivered.isNone():
@@ -292,7 +292,7 @@ suite "segment cache bounds and expiry":
     discard cache.add(segmentFor(1, 0, 4), 256, start)
 
     let dup = cache.add(segmentFor(1, 0, 4), 256, start + initDuration(seconds = 20))
-    check dup.outcome == Ignored
+    check dup.outcome == AddOutcome.Ignored
 
     cache.sweep(start + initDuration(seconds = 31))
     check cache.len == 0
@@ -306,8 +306,8 @@ suite "segment cache bounds and expiry":
 
     discard cache.add(segmentFor(3, 0, 4), 256, start + initDuration(seconds = 2))
     check cache.len == 2
-    check cache.get(setKey(segmentFor(1, 0, 4))).isNil()
-    check not cache.get(setKey(segmentFor(3, 0, 4))).isNil()
+    check cache.get(segmentSetKey(segmentFor(1, 0, 4))).isNil()
+    check not cache.get(segmentSetKey(segmentFor(3, 0, 4))).isNil()
 
   test "a set whose two classes exceed maxTotalSegments is dropped":
     let cache = SegmentCache.new(10, initDuration(seconds = 300))
@@ -317,7 +317,7 @@ suite "segment cache bounds and expiry":
 
     var parity = segmentFor(1, 0, 3)
     parity.isParity = true
-    check cache.add(parity, 6, now).outcome == Ignored
+    check cache.add(parity, 6, now).outcome == AddOutcome.Ignored
     check cache.len == 0
 
 suite "round-trip properties":

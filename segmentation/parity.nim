@@ -31,6 +31,15 @@ const ParityRateScale* = 1_000_000
   ## scaled to 125_000. Keeping it a rational lets the count be derived in
   ## integer arithmetic -- see `parityCountFor`.
 
+func padTo*(chunk: seq[byte], shardLen: int): seq[byte] =
+  ## Zero-pad a chunk up to shard length. Reed-Solomon works on equal-length
+  ## inputs, and leopard reads `shardLen` bytes out of every non-empty entry
+  ## regardless of that seq's actual length.
+  var padded = newSeq[byte](shardLen)
+  for i, b in chunk:
+    padded[i] = b
+  return padded
+
 func parityCountFor*(dataCount, scaledParityRate: int): int =
   ## `ceil(parityRate * dataCount)`, capped so parity stays the minority class.
   ## `scaledParityRate` is the rate numerator over `ParityRateScale`.
