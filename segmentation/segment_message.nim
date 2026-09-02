@@ -81,13 +81,13 @@ func isValid*(m: SegmentMessage, maxTotalSegments: int): bool =
 
 proc encode*(m: SegmentMessage): Result[seq[byte], string] =
   try:
-    return ok(Protobuf.encode(m.toPB))
+    return ok(Protobuf.encode(m.toPB()))
   except CatchableError as e:
     return err("segment_message.encode: protobuf encoding failed: " & e.msg)
 
 proc decodeBytes(data: seq[byte]): Result[SegmentMessage, string] =
   try:
-    return ok(Protobuf.decode(data, SegmentMessagePB).fromPB)
+    return ok(Protobuf.decode(data, SegmentMessagePB).fromPB())
   except CatchableError as e:
     return err("segment_message.decode: protobuf decoding failed: " & e.msg)
 

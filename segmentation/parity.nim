@@ -68,15 +68,12 @@ proc encodeParity*(
   for i in 0 ..< parityCount:
     parity[i] = newSeq[byte](shardLen)
 
-  let encRes = LeoEncoder.init(shardLen, dataShards.len, parityCount)
-  if encRes.isErr:
-    return err("parity.encodeParity: leopard encoder init failed: " & $encRes.error)
+  var encoder = LeoEncoder.init(shardLen, dataShards.len, parityCount).valueOr:
+    return err("parity.encodeParity: leopard encoder init failed: " & $error)
 
-  var encoder = encRes.get()
   try:
-    let encoded = encoder.encode(data, parity)
-    if encoded.isErr:
-      return err("parity.encodeParity: leopard encode failed: " & $encoded.error)
+    encoder.encode(data, parity).isOkOr:
+      return err("parity.encodeParity: leopard encode failed: " & $error)
   finally:
     # No working destructor upstream, so the aligned buffers leak on any early
     # return unless freed here.
@@ -99,15 +96,12 @@ proc decodeParity*(
   for i in 0 ..< dataShards.len:
     recovered[i] = newSeq[byte](shardLen)
 
-  let decRes = LeoDecoder.init(shardLen, dataShards.len, parityShards.len)
-  if decRes.isErr:
-    return err("parity.decodeParity: leopard decoder init failed: " & $decRes.error)
+  var decoder = LeoDecoder.init(shardLen, dataShards.len, parityShards.len).valueOr:
+    return err("parity.decodeParity: leopard decoder init failed: " & $error)
 
-  var decoder = decRes.get()
   try:
-    let decoded = decoder.decode(holey, parity, recovered)
-    if decoded.isErr:
-      return err("parity.decodeParity: leopard decode failed: " & $decoded.error)
+    decoder.decode(holey, parity, recovered).isOkOr:
+      return err("parity.decodeParity: leopard decode failed: " & $error)
   finally:
     decoder.free()
 

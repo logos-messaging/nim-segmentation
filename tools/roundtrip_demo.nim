@@ -21,7 +21,7 @@ echo "payload      : ", payload.len, " bytes"
 echo "chunk size   : ", tx.chunkSize
 echo "segments     : ", segments.len
 echo "largest wire : ",
-  segments.mapIt(it.len).max, " (limit ", DefaultSegmentSizeBytes, ")"
+  segments.mapIt(it.len).max(), " (limit ", DefaultSegmentSizeBytes, ")"
 
 let dataCount = segments.filterIt(not SegmentMessage.decode(it).get().isParity).len
 let parityCount = segments.len - dataCount

@@ -107,7 +107,7 @@ func add*(
   let key = setKey(m)
 
   var s = cache.sets.getOrDefault(key, nil)
-  if s.isNil:
+  if s.isNil():
     if cache.sets.len >= cache.maxSets:
       evictOldest(cache)
     s = SegmentSet(

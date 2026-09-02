@@ -320,7 +320,7 @@ proc handleIncomingSegment*(
     return ok(Opt.none(ReassemblyResult))
 
   let s = self.cache.get(key)
-  if s.isNil or not s.isReconstructible():
+  if s.isNil() or not s.isReconstructible():
     return ok(Opt.none(ReassemblyResult))
 
   let assembled = assemble(s, m.originalPayloadHash, int(m.originalPayloadLength)).valueOr:
