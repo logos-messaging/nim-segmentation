@@ -12,16 +12,16 @@
 ## }
 ## ```
 ##
-## proto3 omits default values, so `index`, `is_parity`, `original_payload_length`
-## and an empty `segment_payload` all legitimately arrive absent. Treating any of
-## them as missing rather than as the default would reject the first segment of
-## every message from a conforming peer.
+## Every field is mandatory. proto3 has no `required`, and it leaves a field
+## sitting at its default value off the wire entirely, so a receiver cannot tell
+## "absent" from "zero" and must read one as the other. What makes the mandatory
+## fields meaningful is therefore enforced after decoding, by `isValid`, rather
+## than by presence.
 
 {.push raises: [].}
 
 import results
 import protobuf_serialization
-import protobuf_serialization/pkg/results as pb_results
 
 export results
 
@@ -37,50 +37,38 @@ type
     isParity*: bool
     segmentPayload*: seq[byte]
 
-  # `uint64` where the spec says `uint32`: the varint is byte-identical below
-  # 2^32, so this stays wire-compatible while keeping out-of-range values.
+  # Mirrors the spec's declaration field for field, except that the counts are
+  # widened: decoding an out-of-range varint straight into `uint32` truncates it
+  # silently, and `uint32(2^32 + 5)` is 5, which `isValid` would wave through.
   SegmentMessagePB {.proto3.} = object
-    originalPayloadHash {.fieldNumber: 1.}: Opt[seq[byte]]
-    originalPayloadLength {.fieldNumber: 2, pint.}: Opt[uint64]
-    index {.fieldNumber: 3, pint.}: Opt[uint64]
-    segmentCount {.fieldNumber: 4, pint.}: Opt[uint64]
-    isParity {.fieldNumber: 5.}: Opt[bool]
-    segmentPayload {.fieldNumber: 6.}: Opt[seq[byte]]
-
-func optBytes(b: seq[byte]): Opt[seq[byte]] =
-  ## Present only when non-empty, so empty optionals stay off the wire.
-  if b.len > 0:
-    return Opt.some(b)
-  return Opt.none(seq[byte])
-
-func optNum(n: uint64): Opt[uint64] =
-  ## proto3 leaves zero-valued scalars off the wire.
-  if n != 0:
-    return Opt.some(n)
-  return Opt.none(uint64)
+    originalPayloadHash {.fieldNumber: 1.}: seq[byte]
+    originalPayloadLength {.fieldNumber: 2, pint.}: uint64
+    index {.fieldNumber: 3, pint.}: uint64
+    segmentCount {.fieldNumber: 4, pint.}: uint64
+    isParity {.fieldNumber: 5.}: bool
+    segmentPayload {.fieldNumber: 6.}: seq[byte]
 
 func toPB(m: SegmentMessage): SegmentMessagePB =
   return SegmentMessagePB(
-    originalPayloadHash: optBytes(m.originalPayloadHash),
-    originalPayloadLength: optNum(m.originalPayloadLength),
-    index: optNum(uint64(m.index)),
-    segmentCount: optNum(uint64(m.segmentCount)),
-    isParity: (if m.isParity: Opt.some(true) else: Opt.none(bool)),
-    segmentPayload: optBytes(m.segmentPayload),
+    originalPayloadHash: m.originalPayloadHash,
+    originalPayloadLength: m.originalPayloadLength,
+    index: uint64(m.index),
+    segmentCount: uint64(m.segmentCount),
+    isParity: m.isParity,
+    segmentPayload: m.segmentPayload,
   )
 
 func fromPB(pb: SegmentMessagePB): SegmentMessage =
-  # Saturate rather than wrap: `uint32(2^32 + 5)` is 5, which would pass
-  # `isValid`; clamping to uint32.high keeps it out of range so it is rejected.
-  let idx = pb.index.valueOr(0'u64)
-  let count = pb.segmentCount.valueOr(0'u64)
+  # Clamp rather than convert: the narrowing would wrap, and a wrapped count can
+  # land back inside the valid range. Clamping keeps it out of range so that
+  # `isValid` rejects it.
   return SegmentMessage(
-    originalPayloadHash: pb.originalPayloadHash.valueOr(@[]),
-    originalPayloadLength: pb.originalPayloadLength.valueOr(0'u64),
-    index: uint32(min(idx, uint64(uint32.high))),
-    segmentCount: uint32(min(count, uint64(uint32.high))),
-    isParity: pb.isParity.valueOr(false),
-    segmentPayload: pb.segmentPayload.valueOr(@[]),
+    originalPayloadHash: pb.originalPayloadHash,
+    originalPayloadLength: pb.originalPayloadLength,
+    index: uint32(min(pb.index, uint64(uint32.high))),
+    segmentCount: uint32(min(pb.segmentCount, uint64(uint32.high))),
+    isParity: pb.isParity,
+    segmentPayload: pb.segmentPayload,
   )
 
 func isValid*(m: SegmentMessage, maxTotalSegments: int): bool =

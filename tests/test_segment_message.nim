@@ -72,6 +72,23 @@ suite "segment message wire format":
     check back.isOk()
     check back.get() == m
 
+  test "an out-of-range count is clamped, not wrapped":
+    # field 4 (segment_count) carrying 2^32 + 5. Narrowing that straight to
+    # uint32 wraps it to 4 -- a perfectly valid count -- so it is clamped to
+    # uint32.high instead, staying out of range for isValid to reject.
+    var encoded = @[0x0A'u8, 0x20'u8] & testHash
+    encoded.add(0x20'u8) # field 4, wire type 0
+    var n = uint64(uint32.high) + 5'u64
+    while n >= 0x80'u64:
+      encoded.add(byte((n and 0x7F'u64) or 0x80'u64))
+      n = n shr 7
+    encoded.add(byte(n))
+
+    let m = SegmentMessage.decode(encoded)
+    check m.isOk()
+    check m.get().segmentCount == uint32.high
+    check not m.get().isValid(256)
+
   test "undecodable bytes are an error, not a crash":
     # Field 1 declares a 127-byte length the buffer cannot satisfy.
     check SegmentMessage.decode(@[0x0A'u8, 0x7F]).isErr()
