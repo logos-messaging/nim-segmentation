@@ -823,3 +823,75 @@ suite "progress reporting":
     discard h.handleIncomingSegment(segments[0]) # duplicate
     discard h.handleIncomingSegment(@[0x0A'u8, 0x7F]) # undecodable
     check seen[] == @[(1, 6)]
+
+suite "assembled length":
+  proc rebuild(
+      payload: seq[byte], declaredLen: int, chunks: seq[seq[byte]]
+  ): seq[seq[byte]] =
+    ## Data segments carrying `chunks` but declaring `payload`'s real hash and
+    ## `declaredLen` as the length -- i.e. a set the hash check alone cannot catch.
+    let hash = SegmentMessage
+      .decode(mkHandler().performSegmentation(payload).get()[0])
+      .get().originalPayloadHash
+    var built: seq[seq[byte]]
+    for i, c in chunks:
+      built.add(
+        SegmentMessage
+          .init(
+            originalPayloadHash = hash,
+            originalPayloadLength = uint64(declaredLen),
+            index = uint32(i),
+            dataSegmentCount = uint32(chunks.len),
+            paritySegmentCount = 0,
+            isParity = false,
+            segmentPayload = c,
+          )
+          .encode()
+          .get()
+      )
+    return built
+
+  test "data segments summing above the declared length are rejected":
+    # The concatenation truncates down to a payload whose hash DOES match, so
+    # only the length check stands between this and a delivery. Data segments
+    # travel at their true length, so a longer sum means a malformed set.
+    let payload = payloadOf(100)
+    let dropped = new seq[(seq[byte], SegmentSetDropReason)]
+    let h = SegmentationHandler
+      .new(
+        SegmentationConfig.init(segmentSizeBytes = 320),
+        onSetDropped = proc(hash: seq[byte], reason: SegmentSetDropReason) {.gcsafe.} =
+          dropped[].add((hash, reason)),
+        onSegmentDiscarded = ignoreDiscarded,
+        onPayloadReassembled = ignorePayload,
+        onSegmentProgress = ignoreProgress,
+      )
+      .expect("valid config")
+
+    let padded = payload[50 ..< 100] & newSeq[byte](20)
+    check h.feed(rebuild(payload, 100, @[payload[0 ..< 50], padded])).isNone()
+    check dropped[].len == 1
+    check h.pendingSets() == 0
+
+  test "data segments summing below the declared length are rejected":
+    let payload = payloadOf(200)
+    let h = mkHandler()
+    check h
+      .feed(rebuild(payload, 200, @[payload[0 ..< 50], payload[50 ..< 100]]))
+      .isNone()
+    check h.pendingSets() == 0
+
+  test "the parity path truncates the padding decoding reintroduces":
+    # The last data segment is short; recovering it brings back shard-length
+    # bytes, which must be trimmed before the hash is checked.
+    let tx = mkHandler(parityRate = 0.125)
+    let payload = payloadOf(1000) # 5 * 192 + 40, so the last chunk is short
+    var segments = tx.performSegmentation(payload).get()
+    let dataCount = segments.filterIt(not SegmentMessage.decode(it).get().isParity).len
+    check payload.len < dataCount * tx.chunkSize
+
+    segments.delete(dataCount - 1) # drop the short last data segment
+    let delivered = mkHandler(parityRate = 0.125).feed(segments)
+    check delivered.isSome()
+    check delivered.get().payload == payload
+    check delivered.get().payload.len == 1000

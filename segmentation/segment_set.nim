@@ -132,19 +132,29 @@ proc assemble*(self: SegmentSet): Result[Opt[seq[byte]], string] =
 
   var assembled: seq[byte]
   if complete:
-    # No decoder needed, and no shard-alignment requirement either.
+    # No decoder needed, and no shard-alignment requirement either. Data segments
+    # travel at their true length, so the concatenation is exactly the payload --
+    # there is no padding to trim, and any disagreement means a malformed set
+    # rather than something to silently cut down to size.
     for i in 0 ..< dataCount:
       assembled.add(self.data.getOrDefault(uint32(i)))
+    if assembled.len != payloadLen:
+      return err(
+        "segment_set.assemble: data segments do not sum to the declared length: " &
+          $assembled.len & " vs " & $payloadLen
+      )
   else:
     assembled = (?recoverThroughParity(self, dataCount, payloadLen)).valueOr:
       return ok(Opt.none(seq[byte]))
 
-  if assembled.len < payloadLen:
-    return err(
-      "segment_set.assemble: assembled payload shorter than declared: " & $assembled.len &
-        " < " & $payloadLen
-    )
-  assembled.setLen(payloadLen)
+    # Decoding returns every data segment at shard length, so a recovered last
+    # segment carries zero padding the sender never transmitted.
+    if assembled.len < payloadLen:
+      return err(
+        "segment_set.assemble: recovered payload shorter than declared: " &
+          $assembled.len & " < " & $payloadLen
+      )
+    assembled.setLen(payloadLen)
 
   if @(keccak256.digest(assembled).data) != self.originalPayloadHash:
     return err(
