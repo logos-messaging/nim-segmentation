@@ -108,7 +108,7 @@ proc new*(T: type SegmentationHandler, config: SegmentationConfig): Result[T, st
       config: config,
       scaledParityRate: int(round(config.parityRate * float(ParityRateScale))),
       chunkSize: chunkSize,
-      cache: newSegmentCache(
+      cache: SegmentCache.new(
         config.maxSegmentSets,
         initDuration(seconds = config.reconstructionTimeoutSeconds),
       ),

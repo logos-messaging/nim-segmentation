@@ -276,7 +276,7 @@ suite "segment cache bounds and expiry":
     )
 
   test "a set idle past the timeout is dropped":
-    let cache = newSegmentCache(10, initDuration(seconds = 30))
+    let cache = SegmentCache.new(10, initDuration(seconds = 30))
     let start = getMonoTime()
     discard cache.add(segmentFor(1, 0, 4), 256, start)
     check cache.len == 1
@@ -287,7 +287,7 @@ suite "segment cache bounds and expiry":
     check cache.len == 0
 
   test "a duplicate does not extend a set's life":
-    let cache = newSegmentCache(10, initDuration(seconds = 30))
+    let cache = SegmentCache.new(10, initDuration(seconds = 30))
     let start = getMonoTime()
     discard cache.add(segmentFor(1, 0, 4), 256, start)
 
@@ -298,7 +298,7 @@ suite "segment cache bounds and expiry":
     check cache.len == 0
 
   test "the least recently updated set is evicted first":
-    let cache = newSegmentCache(2, initDuration(seconds = 300))
+    let cache = SegmentCache.new(2, initDuration(seconds = 300))
     let start = getMonoTime()
     discard cache.add(segmentFor(1, 0, 4), 256, start)
     discard cache.add(segmentFor(2, 0, 4), 256, start + initDuration(seconds = 1))
@@ -310,7 +310,7 @@ suite "segment cache bounds and expiry":
     check not cache.get(setKey(segmentFor(3, 0, 4))).isNil()
 
   test "a set whose two classes exceed maxTotalSegments is dropped":
-    let cache = newSegmentCache(10, initDuration(seconds = 300))
+    let cache = SegmentCache.new(10, initDuration(seconds = 300))
     let now = getMonoTime()
     discard cache.add(segmentFor(1, 0, 4), 6, now)
     check cache.len == 1

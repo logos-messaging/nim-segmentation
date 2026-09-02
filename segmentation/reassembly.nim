@@ -34,9 +34,14 @@ type
     maxSets: int
     timeout: Duration
 
-func newSegmentCache*(maxSets: int, timeout: Duration): SegmentCache =
-  return SegmentCache(
-    sets: initTable[string, SegmentSet](), maxSets: maxSets, timeout: timeout
+func new*(T: type SegmentCache, maxSets: int, timeout: Duration): T =
+  return T(sets: initTable[string, SegmentSet](), maxSets: maxSets, timeout: timeout)
+
+func new*(T: type SegmentSet, now: MonoTime): T =
+  return T(
+    data: initTable[uint32, seq[byte]](),
+    parity: initTable[uint32, seq[byte]](),
+    lastUpdate: now,
   )
 
 func setKey*(m: SegmentMessage): string =
@@ -110,11 +115,7 @@ func add*(
   if s.isNil():
     if cache.sets.len >= cache.maxSets:
       evictOldest(cache)
-    s = SegmentSet(
-      data: initTable[uint32, seq[byte]](),
-      parity: initTable[uint32, seq[byte]](),
-      lastUpdate: now,
-    )
+    s = SegmentSet.new(now)
     cache.sets[key] = s
 
   let counted =
