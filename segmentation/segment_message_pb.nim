@@ -24,7 +24,7 @@ type SegmentMessagePB* {.proto3.} = object
   dataSegmentCount* {.fieldNumber: 4, pint.}: uint64
   paritySegmentCount* {.fieldNumber: 5, pint.}: Opt[uint64]
   isParity* {.fieldNumber: 6.}: bool
-  segmentPayload* {.fieldNumber: 7.}: seq[byte]
+  payload* {.fieldNumber: 7.}: seq[byte]
 
 func init*(
     T: type SegmentMessagePB,
@@ -34,7 +34,7 @@ func init*(
     dataSegmentCount: uint64,
     paritySegmentCount: Opt[uint64],
     isParity: bool,
-    segmentPayload: seq[byte],
+    payload: seq[byte],
 ): T =
   return T(
     originalPayloadHash: originalPayloadHash,
@@ -43,7 +43,7 @@ func init*(
     dataSegmentCount: dataSegmentCount,
     paritySegmentCount: paritySegmentCount,
     isParity: isParity,
-    segmentPayload: segmentPayload,
+    payload: payload,
   )
 
 {.pop.}

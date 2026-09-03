@@ -16,7 +16,7 @@ suite "segment message wire format":
       dataSegmentCount = 5'u32,
       paritySegmentCount = 0,
       isParity = false,
-      segmentPayload = @[1'u8, 2, 3],
+      payload = @[1'u8, 2, 3],
     )
     let encoded = m.encode()
     check encoded.isOk()
@@ -32,7 +32,7 @@ suite "segment message wire format":
       dataSegmentCount = 3'u32,
       paritySegmentCount = 3'u32,
       isParity = true,
-      segmentPayload = @[9'u8, 9, 9, 9],
+      payload = @[9'u8, 9, 9, 9],
     )
     let back = SegmentMessage.decode(m.encode().get())
     check back.isOk()
@@ -48,7 +48,7 @@ suite "segment message wire format":
       dataSegmentCount = 1'u32,
       paritySegmentCount = 0,
       isParity = false,
-      segmentPayload = @[],
+      payload = @[],
     )
     let encoded = m.encode().get()
     # hash (34 bytes) + segment_count (2 bytes); nothing else is on the wire.
@@ -65,7 +65,7 @@ suite "segment message wire format":
       dataSegmentCount = 2'u32,
       paritySegmentCount = 0,
       isParity = false,
-      segmentPayload = @[7'u8],
+      payload = @[7'u8],
     )
     var extended = m.encode().get()
     # A future field 7, varint-encoded: tag (7 shl 3) or 0, then the value.
@@ -107,7 +107,7 @@ suite "segment message validity":
       dataSegmentCount = 2'u32,
       paritySegmentCount = 0,
       isParity = false,
-      segmentPayload = @[1'u8],
+      payload = @[1'u8],
     )
 
   test "a well-formed segment is valid":
@@ -189,7 +189,7 @@ suite "header budget":
         dataSegmentCount = uint32.high,
         paritySegmentCount = uint32.high,
         isParity = true,
-        segmentPayload = newSeq[byte](payloadLen),
+        payload = newSeq[byte](payloadLen),
       )
       let encoded = m.encode().get()
       check encoded.len - payloadLen <= SegmentHeaderMaxBytes

@@ -8,7 +8,7 @@
 ##   uint32          data_segment_count      = 4;  // number of data segments
 ##   optional uint32 parity_segment_count    = 5;  // number of parity segments, unset if no parity
 ##   bool            is_parity               = 6;  // false for a data segment, true for a parity one
-##   bytes           segment_payload         = 7;  // this segment's data chunk or parity shard
+##   bytes           payload         = 7;  // this segment's data chunk or parity shard
 ## }
 ## ```
 ##
@@ -37,7 +37,7 @@ type SegmentMessage* = object ## One segment of a payload, data or parity.
   dataSegmentCount*: uint32
   paritySegmentCount*: uint32 ## Zero when the sender emitted no parity.
   isParity*: bool
-  segmentPayload*: seq[byte]
+  payload*: seq[byte]
 
 func init*(
     T: type SegmentMessage,
@@ -47,7 +47,7 @@ func init*(
     dataSegmentCount: uint32,
     paritySegmentCount: uint32,
     isParity: bool,
-    segmentPayload: seq[byte],
+    payload: seq[byte],
 ): T =
   ## Every field is mandatory, so none is defaulted. The parameter order follows
   ## the spec's field numbering. A `paritySegmentCount` of zero is the spec's
@@ -59,7 +59,7 @@ func init*(
     dataSegmentCount: dataSegmentCount,
     paritySegmentCount: paritySegmentCount,
     isParity: isParity,
-    segmentPayload: segmentPayload,
+    payload: payload,
   )
 
 func init(T: type SegmentMessage, pb: SegmentMessagePB): T =
@@ -76,7 +76,7 @@ func init(T: type SegmentMessage, pb: SegmentMessagePB): T =
     paritySegmentCount =
       uint32(min(pb.paritySegmentCount.valueOr(0'u64), uint64(uint32.high))),
     isParity = pb.isParity,
-    segmentPayload = pb.segmentPayload,
+    payload = pb.payload,
   )
 
 func toPB(self: SegmentMessage): SegmentMessagePB =
@@ -91,7 +91,7 @@ func toPB(self: SegmentMessage): SegmentMessagePB =
       else:
         Opt.some(uint64(self.paritySegmentCount)),
     isParity = self.isParity,
-    segmentPayload = self.segmentPayload,
+    payload = self.payload,
   )
 
 func segmentSetKey*(self: SegmentMessage): string =

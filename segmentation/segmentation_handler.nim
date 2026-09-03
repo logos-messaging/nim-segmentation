@@ -194,7 +194,7 @@ proc performSegmentation*(
           dataSegmentCount = uint32(dataCount),
           paritySegmentCount = uint32(parityCount),
           isParity = false,
-          segmentPayload = chunk,
+          payload = chunk,
         )
         .encode()
     )
@@ -216,7 +216,7 @@ proc performSegmentation*(
             dataSegmentCount = uint32(dataCount),
             paritySegmentCount = uint32(parityCount),
             isParity = true,
-            segmentPayload = shard,
+            payload = shard,
           )
           .encode()
       )
@@ -241,7 +241,7 @@ proc handleIncomingSegment*(
   if not m.isValid(self.config.maxTotalSegments):
     self.notifyDiscarded(SegmentDiscardReason.Invalid)
     return ok(Opt.none(ReassembledPayload))
-  if m.segmentPayload.len > self.config.segmentSizeBytes:
+  if m.payload.len > self.config.segmentSizeBytes:
     self.notifyDiscarded(SegmentDiscardReason.Oversized)
     return ok(Opt.none(ReassembledPayload))
 

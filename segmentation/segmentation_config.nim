@@ -39,7 +39,7 @@ const
     ## | 4 `data_segment_count` | 1 + 5 |
     ## | 5 `parity_segment_count` | 1 + 5 |
     ## | 6 `is_parity` | 1 + 1 |
-    ## | 7 `segment_payload` tag + length | 1 + 5 |
+    ## | 7 `payload` tag + length | 1 + 5 |
     ## | | **66** |
     ##
     ## Rounded up to a multiple of `ShardAlignment` so that a 64-aligned

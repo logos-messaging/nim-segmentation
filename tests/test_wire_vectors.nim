@@ -40,7 +40,7 @@ suite "wire vectors":
       dataSegmentCount = 3'u32,
       paritySegmentCount = 0,
       isParity = false,
-      segmentPayload = @[0xAA'u8, 0xBB, 0xCC],
+      payload = @[0xAA'u8, 0xBB, 0xCC],
     )
     check m.encode().get() == bytes(dataHex)
     check SegmentMessage.decode(bytes(dataHex)).get() == m
@@ -53,7 +53,7 @@ suite "wire vectors":
       dataSegmentCount = 3'u32,
       paritySegmentCount = 1'u32,
       isParity = true,
-      segmentPayload = @[0x11'u8, 0x22],
+      payload = @[0x11'u8, 0x22],
     )
     check m.encode().get() == bytes(parityHex)
     check SegmentMessage.decode(bytes(parityHex)).get() == m
@@ -66,7 +66,7 @@ suite "wire vectors":
       dataSegmentCount = 1'u32,
       paritySegmentCount = 0,
       isParity = false,
-      segmentPayload = @[],
+      payload = @[],
     )
     check m.encode().get() == bytes(minimalHex)
     check SegmentMessage.decode(bytes(minimalHex)).get() == m

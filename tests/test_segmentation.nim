@@ -159,7 +159,7 @@ suite "segmentation without parity":
     check m.dataSegmentCount == 1
     check m.index == 0
     check not m.isParity
-    check m.segmentPayload == payload
+    check m.payload == payload
     # The wrapper is real: the wire bytes are not the bare payload.
     check segments[0] != payload
 
@@ -260,11 +260,11 @@ suite "segmentation with parity":
     for s in segments:
       let m = SegmentMessage.decode(s).get()
       if m.isParity:
-        check m.segmentPayload.len == h.chunkSize
+        check m.payload.len == h.chunkSize
       elif m.index == m.dataSegmentCount - 1:
-        check m.segmentPayload.len == 500 - 2 * h.chunkSize
+        check m.payload.len == 500 - 2 * h.chunkSize
       else:
-        check m.segmentPayload.len == h.chunkSize
+        check m.payload.len == h.chunkSize
 
   test "a lost data segment is recovered through parity":
     let h = mkHandler(parityRate = 0.125)
@@ -310,7 +310,7 @@ suite "segmentation with parity":
 suite "integrity":
   proc corrupt(segment: seq[byte]): seq[byte] =
     var m = SegmentMessage.decode(segment).get()
-    m.segmentPayload[0] = m.segmentPayload[0] xor 0xFF'u8
+    m.payload[0] = m.payload[0] xor 0xFF'u8
     return m.encode().get()
 
   test "a corrupted segment fails the hash check and delivers nothing":
@@ -371,7 +371,7 @@ suite "segment cache bounds and expiry":
       dataSegmentCount = count,
       paritySegmentCount = 0,
       isParity = false,
-      segmentPayload = @[1'u8],
+      payload = @[1'u8],
     )
 
   test "a set idle past the timeout is dropped":
@@ -514,7 +514,7 @@ suite "reception events":
 
     var tampered = segments
     var m = SegmentMessage.decode(segments[2]).get()
-    m.segmentPayload[0] = m.segmentPayload[0] xor 0xFF'u8
+    m.payload[0] = m.payload[0] xor 0xFF'u8
     tampered[2] = m.encode().get()
 
     check h.feed(tampered).isNone()
@@ -582,7 +582,7 @@ suite "reception events":
       dataSegmentCount = 3,
       paritySegmentCount = 3, # 3 + 3 exceeds the limit of 4
       isParity = false,
-      segmentPayload = @[1'u8],
+      payload = @[1'u8],
     )
     check h.handleIncomingSegment(over.encode().get()).get().isNone()
     check discarded[] == @[SegmentDiscardReason.Invalid]
@@ -647,7 +647,7 @@ suite "reception events":
 
     var segments = mkHandler().performSegmentation(payloadOf(1000)).get()
     var m = SegmentMessage.decode(segments[2]).get()
-    m.segmentPayload[0] = m.segmentPayload[0] xor 0xFF'u8
+    m.payload[0] = m.payload[0] xor 0xFF'u8
     segments[2] = m.encode().get()
 
     check h.feed(segments).isNone()
@@ -844,7 +844,7 @@ suite "assembled length":
             dataSegmentCount = uint32(chunks.len),
             paritySegmentCount = 0,
             isParity = false,
-            segmentPayload = c,
+            payload = c,
           )
           .encode()
           .get()

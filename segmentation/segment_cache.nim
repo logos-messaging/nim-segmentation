@@ -151,18 +151,18 @@ proc add*(
 
   # Evict other sets to fit this segment; if the budget still cannot hold it,
   # drop the set being built rather than exceeding the bound.
-  if not self.makeRoom(m.segmentPayload.len, key):
+  if not self.makeRoom(m.payload.len, key):
     let dropped = self.forget(key)
     if not dropped.isNil():
       self.notifyDropped(dropped, SegmentSetDropReason.Evicted)
     return (AddOutcome.Ignored, key, Opt.some(SegmentDiscardReason.CacheFull))
 
   if m.isParity:
-    s.parity[m.index] = m.segmentPayload
+    s.parity[m.index] = m.payload
   else:
-    s.data[m.index] = m.segmentPayload
-  s.heldBytes += m.segmentPayload.len
-  self.heldBytes += m.segmentPayload.len
+    s.data[m.index] = m.payload
+  s.heldBytes += m.payload.len
+  self.heldBytes += m.payload.len
 
   s.lastUpdate = now
   return (AddOutcome.Accepted, key, Opt.none(SegmentDiscardReason))

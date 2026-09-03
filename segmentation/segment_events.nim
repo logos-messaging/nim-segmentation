@@ -29,7 +29,7 @@ type SegmentDiscardReason* {.pure.} = enum
   ## left intact.
   Undecodable ## Not well-formed protobuf.
   Invalid ## Failed the spec's validity rules; see `SegmentMessage.isValid`.
-  Oversized ## `segment_payload` was longer than `segmentSizeBytes`.
+  Oversized ## `payload` was longer than `segmentSizeBytes`.
   Duplicate ## The set already holds this `(is_parity, index)`.
   CountMismatch ## `segment_count` disagreed with the count already fixed for its class.
   CacheFull
