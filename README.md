@@ -93,7 +93,7 @@ an error as routine.
 | `reconstructionTimeoutSeconds` | `0` | How long a set may go without a new segment before it is dropped. 0 means unbounded. |
 | `maxTotalSegments` | `256` | Greatest number of segments one set may hold, data and parity together. |
 | `maxSegmentSets` | `100` | Concurrent partial sets retained; the least recently updated is evicted first. |
-| `maxBufferedBytes` | `32 MiB` | Segment bytes held across all incomplete sets. The bound that actually caps memory. |
+| `maxBufferedBytes` | `32 * (2^20)` | Segment bytes held across all incomplete sets. The bound that actually caps memory. |
 
 The chunk size is derived as `alignDown64(segmentSizeBytes - 128)`. It is rounded to a multiple of 64
 **unconditionally**, not only when this node emits parity: Reed–Solomon requires 64-aligned shards, so
