@@ -1,6 +1,6 @@
 # nim-segmentation
 
-Nim implementation of **LIP-243 — Message Segmentation and Reconstruction**.
+Nim implementation of **[LIP-243](https://lip.logos.co/messaging/application/raw/segmentation.html) — Message Segmentation and Reconstruction**.
 
 Carries an application payload larger than the transport's maximum message size by splitting it into
 segments that the receiver reassembles, out of order, and — with optional Reed–Solomon parity —
