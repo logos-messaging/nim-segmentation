@@ -6,9 +6,9 @@
 ## every non-empty entry regardless of that seq's actual length, so a short shard
 ## is a heap over-read. The procs here re-check it before calling in.
 ##
-## An erasure is signalled to `decode` by an empty seq, and `decode` writes only
-## the erased indices into `recovered`, so `decodeParity` merges the surviving
-## shards back in itself.
+## An erasure is signalled to `decode` by a nil entry in the pointer table, and
+## `decode` writes only the erased indices into `recovered`, so `decodeParity`
+## merges the surviving shards back in itself.
 
 {.push raises: [].}
 import results, leopard
@@ -55,6 +55,24 @@ func parityCountFor*(dataCount, scaledParityRate: int): int =
   let raw = (dataCount * scaledParityRate + ParityRateScale - 1) div ParityRateScale
   return min(raw, dataCount)
 
+func shardTable(shards: var seq[seq[byte]]): seq[LeoBufferPtr] =
+  ## Pointer table over `shards`, nil where a shard is missing -- the erasure
+  ## marker leopard's decoder expects. `shards` must outlive the table and must
+  ## not be resized while it is in use.
+  var table = newSeq[LeoBufferPtr](shards.len)
+  for i in 0 ..< shards.len:
+    table[i] =
+      if shards[i].len > 0:
+        cast[LeoBufferPtr](addr shards[i][0])
+      else:
+        nil
+  return table
+
+func asLeoTable(table: var seq[LeoBufferPtr]): ptr UncheckedArray[LeoBufferPtr] =
+  ## `table` is never empty at the call sites: both classes are checked for a
+  ## zero length first, so indexing element 0 is in bounds.
+  return cast[ptr UncheckedArray[LeoBufferPtr]](addr table[0])
+
 func checkShards(
     shards: openArray[seq[byte]], shardLen: int, what: string
 ): Result[void, string] =
@@ -74,6 +92,9 @@ proc encodeParity*(
   if parityCount <= 0:
     return ok(newSeq[seq[byte]]())
 
+  if dataShards.len == 0:
+    return err("parity.encodeParity: no data shards to encode")
+
   for i, s in dataShards:
     if s.len != shardLen:
       return err(
@@ -86,11 +107,14 @@ proc encodeParity*(
   for i in 0 ..< parityCount:
     parity[i] = newSeq[byte](shardLen)
 
+  var dataTable = shardTable(data)
+  var parityTable = shardTable(parity)
+
   var encoder = LeoEncoder.init(shardLen, dataShards.len, parityCount).valueOr:
     return err("parity.encodeParity: leopard encoder init failed: " & $error)
 
   try:
-    encoder.encode(data, parity).isOkOr:
+    encoder.encode(asLeoTable(dataTable), asLeoTable(parityTable), data.len, parity.len).isOkOr:
       return err("parity.encodeParity: leopard encode failed: " & $error)
   finally:
     # No working destructor upstream, so the aligned buffers leak on any early
@@ -109,20 +133,34 @@ proc decodeParity*(
   ?checkShards(dataShards, shardLen, ShardClassData)
   ?checkShards(parityShards, shardLen, ShardClassParity)
 
-  # leopard takes its inputs as `var openArray`, so the caller's shards are
-  # copied into locals it can bind to. `recovered` must be pre-sized: decode
-  # writes into it with `copyMem`, and only at the erased indices.
+  if dataShards.len == 0 or parityShards.len == 0:
+    return err("parity.decodeParity: no shards to decode")
+
+  # The shards are copied into locals so the pointer tables below stay valid for
+  # the whole call. `recovered` must be pre-sized: decode writes into it with
+  # `copyMem`, and only at the erased indices.
   var data = @dataShards
   var parity = @parityShards
   var recovered = newSeq[seq[byte]](dataShards.len)
   for i in 0 ..< dataShards.len:
     recovered[i] = newSeq[byte](shardLen)
 
+  var dataTable = shardTable(data)
+  var parityTable = shardTable(parity)
+  var recoveredTable = shardTable(recovered)
+
   var decoder = LeoDecoder.init(shardLen, dataShards.len, parityShards.len).valueOr:
     return err("parity.decodeParity: leopard decoder init failed: " & $error)
 
   try:
-    decoder.decode(data, parity, recovered).isOkOr:
+    decoder.decode(
+      asLeoTable(dataTable),
+      asLeoTable(parityTable),
+      asLeoTable(recoveredTable),
+      data.len,
+      parity.len,
+      recovered.len,
+    ).isOkOr:
       return err("parity.decodeParity: leopard decode failed: " & $error)
   finally:
     decoder.free()

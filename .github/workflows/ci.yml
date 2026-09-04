@@ -27,10 +27,6 @@ jobs:
       - name: Install dependencies
         run: nimble setup -l
 
-      # nim-leopard is pinned to an unmerged branch and vendors Leopard-RS as a
-      # git submodule. Nimble's submodule handling is version-dependent, and an
-      # empty vendor tree surfaces only as a confusing CMake error at compile
-      # time, so fail here with a clear message instead.
       - name: Verify the Leopard-RS sources were fetched
         shell: bash
         run: |

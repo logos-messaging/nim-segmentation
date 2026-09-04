@@ -17,7 +17,7 @@ requires "unittest2"
 # exists in stew, and `main` (declaring 0.1.1) switched encode/decode to a
 # raw-pointer API whose erasure marker is a nil pointer rather than an empty
 # seq. The `orc-support` branch declares 0.2.0 and keeps the seq API.
-requires "https://github.com/status-im/nim-leopard#f1878d6aaa816e6c9d7b80d50d773f51dce1b873"
+requires "https://github.com/status-im/nim-leopard#0478b12df90cbbe531efa69422cff67b5a3a5d93"
 
 # Tasks
 

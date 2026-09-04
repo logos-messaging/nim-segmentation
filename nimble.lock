@@ -48,8 +48,8 @@
       }
     },
     "leopard": {
-      "version": "0.2.0",
-      "vcsRevision": "f1878d6aaa816e6c9d7b80d50d773f51dce1b873",
+      "version": "0.1.1",
+      "vcsRevision": "0478b12df90cbbe531efa69422cff67b5a3a5d93",
       "url": "https://github.com/status-im/nim-leopard",
       "downloadMethod": "git",
       "dependencies": [
@@ -57,7 +57,7 @@
         "results"
       ],
       "checksums": {
-        "sha1": "d0dd61a4e9030cbdc3dc92655772a76a12c8bbc1"
+        "sha1": "9352901ef26dfdc51dfc76c500be05a3c89abb1b"
       }
     },
     "nimcrypto": {
