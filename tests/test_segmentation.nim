@@ -33,6 +33,21 @@ proc mkHandler(
     )
     .expect("valid config")
 
+proc mkHandler(
+    dropped: ref seq[(seq[byte], SegmentSetDropReason)], segmentSizeBytes = 320
+): SegmentationHandler =
+  ## A handler recording every set drop, for tests that assert on the reason.
+  return SegmentationHandler
+    .new(
+      SegmentationConfig.init(segmentSizeBytes = segmentSizeBytes),
+      onSetDropped = proc(hash: seq[byte], reason: SegmentSetDropReason) {.gcsafe.} =
+        dropped[].add((hash, reason)),
+      onSegmentDiscarded = ignoreDiscarded,
+      onPayloadReassembled = ignorePayload,
+      onSegmentProgress = ignoreProgress,
+    )
+    .expect("valid config")
+
 proc payloadOf(n: int): seq[byte] =
   var p = newSeq[byte](n)
   for i in 0 ..< n:
@@ -113,6 +128,38 @@ suite "configuration":
       )
       .isErr()
 
+    # The upper bound is what leopard can actually encode, so one over it must
+    # fail at construction rather than at the first oversized payload.
+    let overMax = SegmentationHandler.new(
+      SegmentationConfig.init(maxTotalSegments = MaxSupportedTotalSegments + 1),
+      ignoreDropped,
+      ignoreDiscarded,
+      ignorePayload,
+      ignoreProgress,
+    )
+    check overMax.isErr()
+    check overMax.error.contains("maxTotalSegments")
+
+    check SegmentationHandler
+      .new(
+        SegmentationConfig.init(maxTotalSegments = MaxSupportedTotalSegments),
+        ignoreDropped,
+        ignoreDiscarded,
+        ignorePayload,
+        ignoreProgress,
+      )
+      .isOk()
+
+    let noSets = SegmentationHandler.new(
+      SegmentationConfig.init(maxSegmentSets = 0),
+      ignoreDropped,
+      ignoreDiscarded,
+      ignorePayload,
+      ignoreProgress,
+    )
+    check noSets.isErr()
+    check noSets.error.contains("maxSegmentSets")
+
 suite "callbacks are mandatory":
   test "a nil callback is rejected at construction":
     # Ignoring an outcome must be a decision written as an explicit no-op, not an
@@ -128,6 +175,11 @@ suite "callbacks are mandatory":
     check SegmentationHandler
       .new(
         SegmentationConfig.init(), ignoreDropped, ignoreDiscarded, nil, ignoreProgress
+      )
+      .isErr()
+    check SegmentationHandler
+      .new(
+        SegmentationConfig.init(), ignoreDropped, ignoreDiscarded, ignorePayload, nil
       )
       .isErr()
 
@@ -460,6 +512,7 @@ suite "reception events":
       parityRate = 0.0,
       maxTotalSegments = 256,
       reconstructionTimeoutSeconds = 300,
+      maxBufferedBytes = DefaultMaxBufferedBytes,
   ): SegmentationHandler =
     return SegmentationHandler
       .new(
@@ -468,6 +521,7 @@ suite "reception events":
           parityRate = parityRate,
           maxTotalSegments = maxTotalSegments,
           reconstructionTimeoutSeconds = reconstructionTimeoutSeconds,
+          maxBufferedBytes = maxBufferedBytes,
         ),
         onSetDropped = proc(hash: seq[byte], reason: SegmentSetDropReason) {.gcsafe.} =
           dropped[].add((hash, reason)),
@@ -493,6 +547,29 @@ suite "reception events":
     m.originalPayloadHash.setLen(31)
     check h.handleIncomingSegment(m.encode().get()).get().isNone()
     check discarded[] == @[SegmentDiscardReason.Invalid]
+
+  test "an oversized segment is reported":
+    # A peer can declare a chunk larger than segmentSizeBytes in an otherwise
+    # well-formed message; the guard runs after isValid has passed it.
+    let dropped = new seq[(seq[byte], SegmentSetDropReason)]
+    let discarded = new seq[SegmentDiscardReason]
+    let h = handlerWithEvents(dropped, discarded, segmentSizeBytes = 320)
+
+    var hash = newSeq[byte](SegmentHashLen)
+    hash[0] = 9
+    let oversized = SegmentMessage.init(
+      originalPayloadHash = hash,
+      originalPayloadLength = 321,
+      index = 0,
+      dataSegmentCount = 1,
+      paritySegmentCount = 0,
+      isParity = false,
+      payload = payloadOf(321), # one byte over segmentSizeBytes
+    )
+    check h.handleIncomingSegment(oversized.encode().get()).get().isNone()
+    check discarded[] == @[SegmentDiscardReason.Oversized]
+    check dropped[].len == 0
+    check h.pendingSets() == 0
 
   test "a duplicate segment is reported":
     let dropped = new seq[(seq[byte], SegmentSetDropReason)]
@@ -560,6 +637,25 @@ suite "reception events":
     check dropped[].len == 1
     check dropped[][0][1] == SegmentSetDropReason.Evicted
     check h.pendingSets() == 1
+
+  test "a segment that cannot fit the byte budget reports CacheFull":
+    # The budget holds one 192-byte chunk but not two, and the set being built is
+    # never evicted to free room for its own segment, so that set goes too.
+    let dropped = new seq[(seq[byte], SegmentSetDropReason)]
+    let discarded = new seq[SegmentDiscardReason]
+    let h = handlerWithEvents(dropped, discarded, maxBufferedBytes = 320)
+
+    let segments = mkHandler().performSegmentation(payloadOf(1000)).get()
+    let expectedHash = SegmentMessage.decode(segments[0]).get().originalPayloadHash
+    check h.handleIncomingSegment(segments[0]).get().isNone()
+    check h.bufferedBytes() == h.chunkSize
+    check discarded[].len == 0
+
+    check h.handleIncomingSegment(segments[1]).get().isNone()
+    check discarded[] == @[SegmentDiscardReason.CacheFull]
+    check dropped[] == @[(expectedHash, SegmentSetDropReason.Evicted)]
+    check h.pendingSets() == 0
+    check h.bufferedBytes() == 0
 
   test "no-op callbacks leave discard and delivery unaffected":
     let h = mkHandler()
@@ -857,16 +953,7 @@ suite "assembled length":
     # travel at their true length, so a longer sum means a malformed set.
     let payload = payloadOf(100)
     let dropped = new seq[(seq[byte], SegmentSetDropReason)]
-    let h = SegmentationHandler
-      .new(
-        SegmentationConfig.init(segmentSizeBytes = 320),
-        onSetDropped = proc(hash: seq[byte], reason: SegmentSetDropReason) {.gcsafe.} =
-          dropped[].add((hash, reason)),
-        onSegmentDiscarded = ignoreDiscarded,
-        onPayloadReassembled = ignorePayload,
-        onSegmentProgress = ignoreProgress,
-      )
-      .expect("valid config")
+    let h = mkHandler(dropped)
 
     let padded = payload[50 ..< 100] & newSeq[byte](20)
     check h.feed(rebuild(payload, 100, @[payload[0 ..< 50], padded])).isNone()
@@ -878,10 +965,15 @@ suite "assembled length":
 
   test "data segments summing below the declared length are rejected":
     let payload = payloadOf(200)
-    let h = mkHandler()
+    let dropped = new seq[(seq[byte], SegmentSetDropReason)]
+    let h = mkHandler(dropped)
     check h
       .feed(rebuild(payload, 200, @[payload[0 ..< 50], payload[50 ..< 100]]))
       .isNone()
+    check dropped[].len == 1
+    # A set that never assembled: HashMismatch here would falsely signal the
+    # payload-poisoning attack.
+    check dropped[][0][1] == SegmentSetDropReason.Malformed
     check h.pendingSets() == 0
 
   test "the parity path truncates the padding decoding reintroduces":
@@ -926,7 +1018,8 @@ suite "malformed shard lengths":
     # used to escape the cross-check and be written past the end of that buffer.
     var hash = newSeq[byte](SegmentHashLen)
     hash[0] = 9
-    let h = mkHandler()
+    let dropped = new seq[(seq[byte], SegmentSetDropReason)]
+    let h = mkHandler(dropped)
     check h
       .feed(
         @[
@@ -935,6 +1028,66 @@ suite "malformed shard lengths":
         ]
       )
       .isNone()
+    check dropped[].len == 1
+    check dropped[][0][1] == SegmentSetDropReason.Malformed
+    check h.pendingSets() == 0
+
+  test "a non-last data segment disagreeing with the shard length is rejected":
+    # Only the last data segment may be short, so any other length disagreement
+    # is a set that never assembled -- not the poisoning attack HashMismatch means.
+    var hash = newSeq[byte](SegmentHashLen)
+    hash[0] = 10
+    let dropped = new seq[(seq[byte], SegmentSetDropReason)]
+    let h = mkHandler(dropped)
+    check h
+      .feed(
+        @[
+          crafted(hash, 100, 2, 1, 0'u32, false, payloadOf(200)),
+          crafted(hash, 100, 2, 1, 0'u32, true, payloadOf(64)),
+        ]
+      )
+      .isNone()
+    check dropped[].len == 1
+    check dropped[][0][1] == SegmentSetDropReason.Malformed
+    check h.pendingSets() == 0
+
+  test "parity shards disagreeing on length are rejected":
+    # The shard length is taken from the parity class, so two parity shards that
+    # disagree leave the set unassemblable: Malformed, never a hash failure.
+    var hash = newSeq[byte](SegmentHashLen)
+    hash[0] = 11
+    let dropped = new seq[(seq[byte], SegmentSetDropReason)]
+    let h = mkHandler(dropped)
+    check h
+      .feed(
+        @[
+          crafted(hash, 100, 2, 2, 0'u32, true, payloadOf(64)),
+          crafted(hash, 100, 2, 2, 1'u32, true, payloadOf(128)),
+        ]
+      )
+      .isNone()
+    check dropped[].len == 1
+    check dropped[][0][1] == SegmentSetDropReason.Malformed
+    check h.pendingSets() == 0
+
+  test "a declared length that does not fit the shard geometry is rejected":
+    # 1000 bytes cannot come out of two 64-byte shards. The declared length lies
+    # about the shape of the set, so the drop is Malformed rather than a hash
+    # failure -- nothing was ever assembled to hash.
+    var hash = newSeq[byte](SegmentHashLen)
+    hash[0] = 12
+    let dropped = new seq[(seq[byte], SegmentSetDropReason)]
+    let h = mkHandler(dropped)
+    check h
+      .feed(
+        @[
+          crafted(hash, 1000, 2, 1, 0'u32, false, payloadOf(64)),
+          crafted(hash, 1000, 2, 1, 0'u32, true, payloadOf(64)),
+        ]
+      )
+      .isNone()
+    check dropped[].len == 1
+    check dropped[][0][1] == SegmentSetDropReason.Malformed
     check h.pendingSets() == 0
 
   test "a one-data-segment set has its data shard checked too":
@@ -953,6 +1106,61 @@ suite "malformed shard lengths":
     let r = s.assemble()
     check r.isErr()
     check "shardLengthOf" in r.error
+
+  test "an unaligned shard length holds the set instead of dropping it":
+    # 100-byte parity shards come from a peer whose chunk size is not a multiple
+    # of ShardAlignment: undecodable here, but its data segments can still
+    # complete the set, so the set is held rather than dropped.
+    var hash = newSeq[byte](SegmentHashLen)
+    hash[0] = 13
+    let dropped = new seq[(seq[byte], SegmentSetDropReason)]
+    let h = mkHandler(dropped)
+    check h
+      .feed(
+        @[
+          crafted(hash, 200, 2, 1, 1'u32, false, payloadOf(100)),
+          crafted(hash, 200, 2, 1, 0'u32, true, payloadOf(100)),
+        ]
+      )
+      .isNone()
+    check dropped[].len == 0
+    check h.pendingSets() == 1
+
+  test "an empty parity shard holds the set instead of dropping it":
+    # A zero-length parity shard makes the shard length zero, which is aligned
+    # yet just as undecodable -- the other half of the same guard.
+    var hash = newSeq[byte](SegmentHashLen)
+    hash[0] = 14
+    let dropped = new seq[(seq[byte], SegmentSetDropReason)]
+    let h = mkHandler(dropped)
+    check h.feed(@[crafted(hash, 100, 1, 1, 0'u32, true, newSeq[byte]())]).isNone()
+    check dropped[].len == 0
+    check h.pendingSets() == 1
+
+  test "a set held over an unaligned shard length still completes":
+    # Holding is only worth it because the data segments alone assemble.
+    let payload = payloadOf(200)
+    let hash = SegmentMessage
+      .decode(mkHandler().performSegmentation(payload).get()[0])
+      .get().originalPayloadHash
+    let dropped = new seq[(seq[byte], SegmentSetDropReason)]
+    let h = mkHandler(dropped)
+    check h
+      .feed(
+        @[
+          crafted(hash, 200, 2, 1, 1'u32, false, payload[100 ..< 200]),
+          crafted(hash, 200, 2, 1, 0'u32, true, payloadOf(100)),
+        ]
+      )
+      .isNone()
+    check h.pendingSets() == 1
+
+    let delivered =
+      h.feed(@[crafted(hash, 200, 2, 1, 0'u32, false, payload[0 ..< 100])])
+    check delivered.isSome()
+    check delivered.get().payload == payload
+    check dropped[].len == 0
+    check h.pendingSets() == 0
 
 suite "empty payload with parity":
   test "an empty payload is recovered when its only data segment is lost":
