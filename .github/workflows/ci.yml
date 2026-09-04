@@ -1,0 +1,40 @@
+name: ci / nimble
+permissions:
+  contents: read
+  pull-requests: read
+on:
+  pull_request:
+    branches: [master, release/*]
+  push:
+    branches: [master, release/*]
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: 'test / ${{ matrix.os }}'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jiro4989/setup-nim-action@v2
+        with:
+          nim-version: '2.2.6'
+
+      - name: Install dependencies
+        run: nimble setup -l
+
+      - name: Verify the Leopard-RS sources were fetched
+        shell: bash
+        run: |
+          vendor=$(echo nimbledeps/pkgs2/leopard-*/vendor/leopard)
+          if [ ! -f "$vendor/CMakeLists.txt" ]; then
+            echo "nim-leopard's vendor/leopard submodule is missing from $vendor"
+            exit 1
+          fi
+
+      - name: Run test suite
+        run: nimble test
