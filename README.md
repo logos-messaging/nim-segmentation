@@ -84,24 +84,6 @@ sender, so it is better placed to raise the event.
 out-of-bounds or hash-failing segment — comes back as `ok(Opt.none)`, so callers never have to treat
 an error as routine.
 
-## Wire format
-
-```protobuf
-syntax = "proto3";
-
-message SegmentMessage {
-  bytes           original_payload_hash   = 1;  // Keccak256 of the original payload, 32 bytes
-  uint32          original_payload_length = 2;  // length in bytes of the original payload
-  uint32          index                   = 3;  // zero-based position within this segment's own class
-  uint32          data_segment_count      = 4;  // number of data segments
-  optional uint32 parity_segment_count    = 5;  // number of parity segments, unset if no parity
-  bool            is_parity               = 6;  // false for a data segment, true for a parity one
-  bytes           segment_payload         = 7;  // this segment's data chunk or parity shard
-}
-```
-
-Golden byte vectors for this encoding are pinned in [tests/test_wire_vectors.nim](tests/test_wire_vectors.nim).
-
 ## Configuration
 
 | Field | Default | Meaning |
