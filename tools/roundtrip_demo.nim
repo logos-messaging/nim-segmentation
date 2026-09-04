@@ -31,11 +31,15 @@ proc main() =
       p[i] = byte(rng.rand(255))
     p
 
+  # Both handlers agree on the shape of the set, so they share one config: a
+  # receiver deriving a different chunk size could not decode what was sent.
+  let config = SegmentationConfig.init(parityRate = 0.125)
+
   # This handler only sends, so its reception callbacks are explicit no-ops --
   # a decision, rather than an omission.
   let tx = SegmentationHandler
     .new(
-      SegmentationConfig.init(parityRate = 0.125),
+      config,
       onSetDropped = ignoreDropped,
       onSegmentDiscarded = ignoreDiscarded,
       onPayloadReassembled = ignorePayload,
@@ -67,7 +71,7 @@ proc main() =
   let events = new seq[string]
   let rx = SegmentationHandler
     .new(
-      SegmentationConfig.init(parityRate = 0.125),
+      config,
       onSetDropped = proc(
           hash: seq[byte], reason: SegmentSetDropReason
       ) {.gcsafe, raises: [].} =
