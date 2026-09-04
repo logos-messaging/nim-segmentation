@@ -90,7 +90,7 @@ an error as routine.
 |---|---|---|
 | `segmentSizeBytes` | `102_400` | Maximum size of a **serialized** segment message. |
 | `parityRate` | `0.0` | Parity segments as a fraction of data segments; `0` disables parity. Must not exceed `1`. |
-| `reconstructionTimeoutSeconds` | `300` | How long a set may go without a new segment before it is dropped. |
+| `reconstructionTimeoutSeconds` | `0` | How long a set may go without a new segment before it is dropped. 0 means unbounded. |
 | `maxTotalSegments` | `256` | Greatest number of segments one set may hold, data and parity together. |
 | `maxSegmentSets` | `100` | Concurrent partial sets retained; the least recently updated is evicted first. |
 | `maxBufferedBytes` | `32 MiB` | Segment bytes held across all incomplete sets. The bound that actually caps memory. |
