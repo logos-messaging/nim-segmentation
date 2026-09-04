@@ -23,6 +23,9 @@ type SegmentSetDropReason* {.pure.} = enum
     ## The set reassembled, but the payload did not match `original_payload_hash`.
     ## Either corruption, or the poisoning attack the spec's Integrity section
     ## describes -- an injected segment occupying an `(is_parity, index)` slot.
+  Malformed
+    ## The set never reassembled: its segment lengths, declared payload length
+    ## and shard geometry do not agree, so the hash was never reached.
 
 type SegmentDiscardReason* {.pure.} = enum
   ## Why a single arriving segment was dropped. The set it named, if any, is
@@ -53,17 +56,19 @@ type SegmentProgressHandler* =
   ##
   ## The only outcome the return value cannot express: it speaks solely when a
   ## set completes, so a large payload arriving over a lossy link is otherwise
-  ## invisible until the end. `expected` is 0 until the first data segment lands,
-  ## since `segment_count` on a parity segment counts parity.
+  ## invisible until the end. `expected` is the data-segment count, known from
+  ## the first segment of the set to arrive whichever class it belongs to, since
+  ## every segment carries both class counts.
 
 type SegmentSetDroppedHandler* = proc(
   originalPayloadHash: seq[byte], reason: SegmentSetDropReason
 ) {.gcsafe, raises: [].}
-  ## Invoked once per abandoned set. `nil` disables the notification.
+  ## Invoked once per abandoned set. Required: `SegmentationHandler.new` rejects
+  ## a nil callback.
 
 type SegmentDiscardedHandler* =
   proc(reason: SegmentDiscardReason) {.gcsafe, raises: [].}
   ## Invoked per rejected segment. Expect volume: duplicates are routine during
-  ## retransmission. `nil` disables the notification.
+  ## retransmission. Required: `SegmentationHandler.new` rejects a nil callback.
 
 {.pop.}

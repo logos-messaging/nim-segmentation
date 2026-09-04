@@ -45,7 +45,7 @@ Everything else is reported through callbacks supplied at construction:
 let handler = SegmentationHandler.new(
   config,
   onSetDropped = proc(hash: seq[byte], reason: SegmentSetDropReason) {.gcsafe, raises: [].} =
-    # Expired | Evicted | HashMismatch -- this payload never arrives
+    # Expired | Evicted | HashMismatch | Malformed -- this payload never arrives
     emitMessageLost(hash, reason),
   onSegmentDiscarded = proc(reason: SegmentDiscardReason) {.gcsafe, raises: [].} =
     # Undecodable | Invalid | Oversized | Duplicate | CountMismatch
@@ -58,7 +58,7 @@ let handler = SegmentationHandler.new(
 ).expect("valid config")
 ```
 
-All three are **required** — `new` fails on a nil callback. Reception discards far more
+All four are **required** — `new` fails on a nil callback. Reception discards far more
 than it delivers, and an expired, evicted or hash-failing set has no other channel, so an
 unwired `onSetDropped` loses payloads silently. Ignoring an outcome is fine, it just has
 to be an explicit no-op rather than an omission:

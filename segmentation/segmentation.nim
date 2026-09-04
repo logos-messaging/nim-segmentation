@@ -57,7 +57,7 @@
 ## onSegmentDiscarded(reason)                  # Undecodable, Invalid, Oversized,
 ##                                             # Duplicate, CountMismatch, CacheFull
 ## ```
-## All three are required, and `new` fails on a nil one. Reception discards far
+## All four are required, and `new` fails on a nil one. Reception discards far
 ## more than it delivers, and an expired, evicted or hash-failing set has no
 ## other channel -- so an unwired `onSetDropped` would lose payloads silently.
 ## Choosing to ignore an outcome is fine; it just has to be written as an

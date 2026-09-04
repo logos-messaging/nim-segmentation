@@ -561,7 +561,7 @@ suite "reception events":
     check dropped[][0][1] == SegmentSetDropReason.Evicted
     check h.pendingSets() == 1
 
-  test "callbacks default to nil and are simply not called":
+  test "no-op callbacks leave discard and delivery unaffected":
     let h = mkHandler()
     check h.handleIncomingSegment(@[0x0A'u8, 0x7F]).get().isNone()
     check h.feed(mkHandler().performSegmentation(payloadOf(1000)).get()).isSome()
@@ -871,6 +871,9 @@ suite "assembled length":
     let padded = payload[50 ..< 100] & newSeq[byte](20)
     check h.feed(rebuild(payload, 100, @[payload[0 ..< 50], padded])).isNone()
     check dropped[].len == 1
+    # Not a hash failure: reporting HashMismatch here would signal the poisoning
+    # attack for a set that simply never assembled.
+    check dropped[][0][1] == SegmentSetDropReason.Malformed
     check h.pendingSets() == 0
 
   test "data segments summing below the declared length are rejected":
@@ -895,3 +898,79 @@ suite "assembled length":
     check delivered.isSome()
     check delivered.get().payload == payload
     check delivered.get().payload.len == 1000
+
+suite "malformed shard lengths":
+  proc crafted(
+      hash: seq[byte],
+      declaredLen, dataCount, parityCount: int,
+      index: uint32,
+      isParity: bool,
+      payload: seq[byte],
+  ): seq[byte] =
+    return SegmentMessage
+      .init(
+        originalPayloadHash = hash,
+        originalPayloadLength = uint64(declaredLen),
+        index = index,
+        dataSegmentCount = uint32(dataCount),
+        paritySegmentCount = uint32(parityCount),
+        isParity = isParity,
+        payload = payload,
+      )
+      .encode()
+      .get()
+
+  test "a data segment longer than the shard length is rejected, not padded":
+    # The parity class fixes the shard length, and every data segment is padded
+    # into a buffer of that size before decoding. An over-long last data segment
+    # used to escape the cross-check and be written past the end of that buffer.
+    var hash = newSeq[byte](SegmentHashLen)
+    hash[0] = 9
+    let h = mkHandler()
+    check h
+      .feed(
+        @[
+          crafted(hash, 100, 2, 1, 1'u32, false, payloadOf(200)),
+          crafted(hash, 100, 2, 1, 0'u32, true, payloadOf(64)),
+        ]
+      )
+      .isNone()
+    check h.pendingSets() == 0
+
+  test "a one-data-segment set has its data shard checked too":
+    # With a single data segment the "all but the last" rule covers no index at
+    # all, so the check has to reach the last shard as well.
+    let s = SegmentSet.new(
+      originalPayloadHash = newSeq[byte](SegmentHashLen),
+      originalPayloadLength = 40'u64,
+      dataCount = 1,
+      parityCount = 1,
+      now = getMonoTime(),
+    )
+    s.data[1'u32] = payloadOf(200)
+    s.parity[0'u32] = payloadOf(64)
+
+    let r = s.assemble()
+    check r.isErr()
+    check "shardLengthOf" in r.error
+
+suite "empty payload with parity":
+  test "an empty payload is recovered when its only data segment is lost":
+    # A zero-length payload needs no shard bytes at all, and travels as a single
+    # empty data segment -- the one legitimate set the geometry check must not
+    # read as an inconsistent one.
+    let tx = mkHandler(parityRate = 0.125)
+    let segments = tx.performSegmentation(@[]).get()
+    check segments.len == 2 # one empty data segment plus one parity shard
+
+    var lossy = segments
+    lossy.delete(0)
+    check SegmentMessage.decode(lossy[0]).get().isParity
+
+    let rx = mkHandler(parityRate = 0.125)
+    let delivered = rx.feed(lossy)
+    check delivered.isSome()
+    check delivered.get().payload.len == 0
+    check delivered.get().originalPayloadHash ==
+      SegmentMessage.decode(segments[0]).get().originalPayloadHash
+    check rx.pendingSets() == 0

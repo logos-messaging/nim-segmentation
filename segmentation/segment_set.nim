@@ -72,10 +72,19 @@ func shardLengthOf(self: SegmentSet, dataCount: int): Result[int, string] =
     return
       err("segment_set.shardLengthOf: no parity shard to take the shard length from")
   for idx, d in self.data:
-    if int(idx) < dataCount - 1 and d.len != shardLen:
+    if int(idx) < dataCount - 1:
+      if d.len != shardLen:
+        return err(
+          "segment_set.shardLengthOf: data shard disagrees with the parity shard length: index " &
+            $idx & " is " & $d.len & " bytes, expected " & $shardLen
+        )
+    elif d.len == 0 or d.len > shardLen:
+      # The last data segment is the only short one, and it is still padded into
+      # a shard-length buffer -- an over-long one would be written past its end.
+      # An index beyond the last is malformed too, and lands here.
       return err(
-        "segment_set.shardLengthOf: data shard disagrees with the parity shard length: index " &
-          $idx & " is " & $d.len & " bytes, expected " & $shardLen
+        "segment_set.shardLengthOf: last data shard does not fit the shard length: index " &
+          $idx & " is " & $d.len & " bytes, expected 1 to " & $shardLen
       )
   return ok(shardLen)
 
@@ -93,8 +102,15 @@ proc recoverThroughParity(
     return ok(Opt.none(seq[byte]))
 
   # Cheap geometry check on the claimed length, so a hostile set is dropped
-  # before any of it is assembled.
-  if payloadLen > dataCount * shardLen or payloadLen <= (dataCount - 1) * shardLen:
+  # before any of it is assembled: the length has to genuinely need every
+  # declared shard. The empty payload is the one set that needs none, and it is
+  # always a single data segment -- so only there does the floor drop to zero.
+  let minPayloadLen =
+    if dataCount == 1:
+      0
+    else:
+      (dataCount - 1) * shardLen + 1
+  if payloadLen > dataCount * shardLen or payloadLen < minPayloadLen:
     return err(
       "segment_set.recoverThroughParity: declared payload length does not fit the shard geometry: " &
         $payloadLen & " bytes over " & $dataCount & " shards of " & $shardLen

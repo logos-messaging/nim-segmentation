@@ -20,6 +20,12 @@ import
 export
   reassembled_payload, segmentation_config, segment_events, segment_message, results
 
+# `assemble` reports every failure as a descriptive string, and only this one is
+# the hash comparison itself -- the single outcome that is evidence of the
+# poisoning attack rather than of a set that never assembled.
+const AssembleHashMismatchError =
+  "segment_set.assemble: reconstructed payload does not match the declared hash"
+
 static:
   # `new` rejects anything below MinSegmentSizeBytes, so this is what keeps the
   # chunk size positive for every config it does accept.
@@ -32,8 +38,9 @@ type SegmentationHandler* = ref object
   scaledParityRate: int
   chunkSize: int
   cache: SegmentCache
-  # The cache reports the drops it owns; HashMismatch is detected here, after a
-  # set has already been handed back, so the handler needs the callback too.
+  # The cache reports the drops it owns; a failed reassembly is detected here,
+  # after a set has already been handed back, so the handler needs the callback
+  # too.
   onSetDropped: SegmentSetDroppedHandler
   onSegmentDiscarded: SegmentDiscardedHandler
   onPayloadReassembled: PayloadReassembledHandler
@@ -52,10 +59,11 @@ proc new*(
   ## first send.
   ##
   ## The callbacks report every reception outcome: `onPayloadReassembled` when a
-  ## payload completes, `onSetDropped` once per abandoned payload, and
-  ## `onSegmentDiscarded` per rejected segment.
+  ## payload completes, `onSetDropped` once per abandoned payload,
+  ## `onSegmentDiscarded` per rejected segment, and `onSegmentProgress` per
+  ## stored segment.
   ##
-  ## All three are required and must be non-nil. Reception discards far more than
+  ## All four are required and must be non-nil. Reception discards far more than
   ## it delivers, and a set that expires, is evicted or fails its hash check has
   ## no other channel -- so a consumer that had not wired `onSetDropped` would
   ## lose payloads silently. Deciding to ignore an outcome is fine; it just has
@@ -262,10 +270,15 @@ proc handleIncomingSegment*(
     return ok(Opt.none(ReassembledPayload))
 
   let assembled = s.assemble().valueOr:
-    # The spec leaves hash-failure behaviour undefined. Drop the set: keeping it
-    # would let one bad shard wedge reconstruction until the timeout.
+    # The spec leaves reassembly-failure behaviour undefined. Drop the set:
+    # keeping it would let one bad shard wedge reconstruction until the timeout.
     self.cache.remove(key)
-    self.notifySetDropped(s, SegmentSetDropReason.HashMismatch)
+    let reason =
+      if error == AssembleHashMismatchError:
+        SegmentSetDropReason.HashMismatch
+      else:
+        SegmentSetDropReason.Malformed
+    self.notifySetDropped(s, reason)
     return ok(Opt.none(ReassembledPayload))
 
   let payload = assembled.valueOr:
