@@ -32,9 +32,8 @@ let reassembled = handler.handleIncomingSegment(received).get()
 if reassembled.isSome():
   deliver(reassembled.get().payload)
 
-# Drop segment sets that went quiet before completing. Nothing else sweeps them,
-# so run this on a timer or the reconstruction timeout only bites on the next
-# arriving segment.
+# Drop segment sets that are too old. This should be called periodically
+# at a rate near reconstructionTimeoutSeconds.
 handler.cleanupSegments()
 ```
 
