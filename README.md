@@ -103,38 +103,6 @@ Because the segment bound is on the **sum** of both classes, the usable data-chu
 `maxTotalSegments` whenever parity is on — at `parityRate = 0.125` and `maxTotalSegments = 256` it is 227.
 `performSegmentation` returns `err` for a payload that would exceed it.
 
-## Layout
-
-One type per module; `segmentation.nim` is the entry point and re-exports the public surface.
-
-```
-segmentation/
-  segmentation.nim            # package entry point, no code of its own
-  segment_message.nim         # SegmentMessage -- the wire unit, and its validity rules
-  segment_message_pb.nim      # SegmentMessagePB -- proto3 mirror and codec
-  segment_set.nim             # SegmentSet -- a payload's segments, and its reassembly
-  segment_events.nim          # drop/discard reasons and callback signatures
-  segment_cache.nim           # SegmentCache -- set store: dedup, bounds, expiry
-                              # (with AddOutcome, its result enum)
-  reassembled_payload.nim     # ReassembledPayload -- a reconstructed payload
-  segmentation_config.nim     # SegmentationConfig and its defaults
-  segmentation_handler.nim    # SegmentationHandler -- the stateful entry point
-  parity.nim                  # Reed-Solomon helpers (no type of its own)
-```
-
-A type's operations live in its own module, so private fields stay private:
-`SegmentCache.sets` and the handler's internals are reachable only from the module
-that declares them.
-
-## Dependencies
-
-`nim-leopard` is pinned by commit sha rather than by version range. Its `0.1.0` tag imports
-`pkg/stew/results`, which no longer exists in stew; its `main` branch (declaring `0.1.1`, so it
-*satisfies* `>= 0.1.0 & < 0.2.0`) switched `encode`/`decode` to a raw-pointer API whose erasure marker is
-a nil pointer rather than an empty seq. The pinned `orc-support` revision declares `0.2.0` and keeps the
-seq API. Once that is merged and tagged upstream, move to a normal version range.
-
-`nimble setup -l` builds the Leopard-RS C++ library via CMake (3.7+ required).
 
 ## Security
 
