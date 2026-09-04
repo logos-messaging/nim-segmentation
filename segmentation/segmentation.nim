@@ -57,11 +57,10 @@
 ## onSegmentDiscarded(reason)                  # Undecodable, Invalid, Oversized,
 ##                                             # Duplicate, CountMismatch, CacheFull
 ## ```
-## All four are required, and `new` fails on a nil one. Reception discards far
+## All four are required, and `new` fails on a nil one: reception discards far
 ## more than it delivers, and an expired, evicted or hash-failing set has no
-## other channel -- so an unwired `onSetDropped` would lose payloads silently.
-## Choosing to ignore an outcome is fine; it just has to be written as an
-## explicit no-op rather than left out.
+## other channel, so an unwired `onSetDropped` would lose payloads silently.
+## Ignoring an outcome is fine, but it has to be written as an explicit no-op.
 ##
 ## `onPayloadReassembled` fires immediately before the same payload is returned:
 ## they are one event reported twice, so act on the callback or on the returned
@@ -95,9 +94,8 @@
 ## or occupy an `(is_parity, index)` slot of a set in flight so the genuine
 ## segment is ignored and the set fails its hash check -- surfacing as
 ## `onSetDropped(..., HashMismatch)`. Applications SHOULD encrypt each serialized
-## `SegmentMessage` before transmission, which hides the hash and denies an
-## attacker the value that attack needs. Authenticity must come from another
-## layer.
+## `SegmentMessage` before transmission, which hides the hash that attack needs.
+## Authenticity must come from another layer.
 ##
 ## **Constants**: `Default*` config values, `SegmentHashLen`,
 ## `SegmentHeaderMaxBytes`, `MinSegmentSizeBytes`, `MaxSupportedTotalSegments`.

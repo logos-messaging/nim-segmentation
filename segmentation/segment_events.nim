@@ -1,10 +1,9 @@
 ## What the receiver reports to the consumer application.
 ##
-## The library owns no event system of its own: it invokes plain callbacks, and
-## the layer above turns them into whatever it already uses. That keeps this
-## package free of an async runtime, and keeps events where the context lives --
-## a set drop here knows a payload hash and nothing else, while the caller knows
-## the channel and the sender.
+## The library owns no event system: it invokes plain callbacks, which the layer
+## above turns into whatever it already uses. That keeps this package free of an
+## async runtime, and events where the context lives -- a set drop here knows a
+## payload hash and nothing else, while the caller knows the channel and sender.
 ##
 ## Callbacks are supplied to `SegmentationHandler.new` and are never reassigned,
 ## so there is no window where half a handler is wired up.
@@ -44,21 +43,20 @@ type PayloadReassembledHandler* =
   ## Invoked the moment a set reassembles and its Keccak256 verifies, immediately
   ## before `handleIncomingSegment` returns the same payload.
   ##
-  ## The return value and this callback report one event, not two: wire this and
-  ## a consumer can ignore the returned `Opt` entirely, treating reception as
-  ## uniformly callback-driven alongside the drop and discard notifications.
-  ## Acting on both would process every payload twice.
+  ## The return value and this callback are one event, not two: wire this and a
+  ## consumer can ignore the returned `Opt` entirely, treating reception as
+  ## uniformly callback-driven. Acting on both processes every payload twice.
 
 type SegmentProgressHandler* =
   proc(originalPayloadHash: seq[byte], held, expected: int) {.gcsafe, raises: [].}
   ## Invoked for each segment stored, with the count now held for that payload
   ## and the data-segment count needed to reconstruct it.
   ##
-  ## The only outcome the return value cannot express: it speaks solely when a
-  ## set completes, so a large payload arriving over a lossy link is otherwise
-  ## invisible until the end. `expected` is the data-segment count, known from
-  ## the first segment of the set to arrive whichever class it belongs to, since
-  ## every segment carries both class counts.
+  ## The one outcome the return value cannot express: it speaks only when a set
+  ## completes, so a large payload arriving over a lossy link is invisible until
+  ## the end. `expected` is the data-segment count, known from the first segment
+  ## of the set to arrive whichever class it belongs to, since every segment
+  ## carries both class counts.
 
 type SegmentSetDroppedHandler* = proc(
   originalPayloadHash: seq[byte], reason: SegmentSetDropReason

@@ -3,8 +3,8 @@
 ## round trip. Run with `nim c -r -d:release tools/roundtrip_demo.nim`.
 ##
 ## Doubles as the shortest complete example of wiring the reception callbacks.
-## Note the whole thing lives in a proc: the callbacks are `{.gcsafe.}`, so they
-## may close over locals but not over mutable module-level globals.
+## It all lives in a proc because the callbacks are `{.gcsafe.}`: they may close
+## over locals but not over mutable module-level globals.
 import std/[algorithm, monotimes, random, sequtils, times]
 import results
 import segmentation

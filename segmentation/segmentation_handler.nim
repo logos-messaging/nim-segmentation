@@ -61,16 +61,13 @@ proc new*(
   ## The callbacks report every reception outcome: `onPayloadReassembled` when a
   ## payload completes, `onSetDropped` once per abandoned payload,
   ## `onSegmentDiscarded` per rejected segment, and `onSegmentProgress` per
-  ## stored segment.
+  ## stored segment, for reporting partial arrival of a large payload.
   ##
-  ## All four are required and must be non-nil. Reception discards far more than
+  ## All four are required and must be non-nil: reception discards far more than
   ## it delivers, and a set that expires, is evicted or fails its hash check has
-  ## no other channel -- so a consumer that had not wired `onSetDropped` would
-  ## lose payloads silently. Deciding to ignore an outcome is fine; it just has
-  ## to be a decision, written as an explicit no-op rather than an omission.
-  ##
-  ## `onSegmentProgress` fires per stored segment, for reporting partial arrival
-  ## of a large payload.
+  ## no other channel, so an unwired `onSetDropped` would lose payloads silently.
+  ## Ignoring an outcome is fine, but it has to be a decision written as an
+  ## explicit no-op rather than an omission.
   ##
   ## `onPayloadReassembled` carries the same payload the call returns; use one or
   ## the other, not both.

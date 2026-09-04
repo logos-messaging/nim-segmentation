@@ -1,9 +1,8 @@
 ## In-memory cache of partially received segment sets.
 ##
-## A set is keyed by `(original_payload_hash, original_payload_length)` only.
-## `segment_count` is deliberately NOT part of the key: it counts one class, so
-## keying on it would file a payload's data and parity segments under two
-## different sets and parity recovery would never fire.
+## A set is keyed by `(original_payload_hash, original_payload_length)` only:
+## `segment_count` counts a single class, so keying on it would file a payload's
+## data and parity segments as two sets and parity recovery would never fire.
 ##
 ## This module owns storage, dedup, bounds and expiry. Hashing, Reed-Solomon and
 ## payload assembly live in `reconstruction`.
@@ -39,10 +38,10 @@ func new*(
   ## callback, so a handler-owned cache always has one.
   ##
   ## Two independent bounds, as the spec's Segment Caching section requires:
-  ## `maxSets` caps how many payloads may be in flight, `maxBytes` caps what they
-  ## may occupy. The set cap alone leaves the byte ceiling at
-  ## `maxSets * maxTotalSegments * segmentSizeBytes`, which is far too large to
-  ## be the real protection.
+  ## `maxSets` caps how many payloads may be in flight, `maxBytes` what they may
+  ## occupy. The set cap alone leaves the byte ceiling at
+  ## `maxSets * maxTotalSegments * segmentSizeBytes`, far too large to be the
+  ## real protection.
   return T(
     sets: initTable[string, SegmentSet](),
     maxSets: maxSets,

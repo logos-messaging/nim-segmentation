@@ -1,14 +1,14 @@
 ## Reed-Solomon erasure coding over a payload's data segments, via nim-leopard.
 ##
-## Leopard works on equal-length inputs called shards. Callers must hand every
-## shard at exactly `shardLen` bytes -- this is a memory-safety requirement, not
-## just a correctness one: leopard's `encode`/`decode` `copyMem` `bufSize` bytes
-## out of every non-empty entry regardless of that seq's actual length, so a
-## short shard is a heap over-read. The procs here re-check it before calling in.
+## Leopard works on equal-length inputs called shards, and every shard must be
+## exactly `shardLen` bytes -- a memory-safety requirement, not just a
+## correctness one: leopard's `encode`/`decode` `copyMem` `bufSize` bytes out of
+## every non-empty entry regardless of that seq's actual length, so a short shard
+## is a heap over-read. The procs here re-check it before calling in.
 ##
 ## An erasure is signalled to `decode` by an empty seq, and `decode` writes only
-## the erased indices into `recovered` -- surviving shards are never copied
-## there, so `decodeParity` merges the two itself.
+## the erased indices into `recovered`, so `decodeParity` merges the surviving
+## shards back in itself.
 
 {.push raises: [].}
 import results, leopard
@@ -25,32 +25,31 @@ func alignShardLen*(n: int): int =
   return (n div ShardAlignment) * ShardAlignment
 
 const ParityRateScale* = 1_000_000
-  ## Denominator the parity rate is carried over, so `parityRate = 0.125` is
-  ## scaled to 125_000. Keeping it a rational lets the count be derived in
-  ## integer arithmetic -- see `parityCountFor`.
+  ## Denominator the parity rate is carried over, so `parityRate = 0.125` scales
+  ## to 125_000 and the count can be derived in integer arithmetic -- see
+  ## `parityCountFor`.
 
 func padTo*(chunk: seq[byte], shardLen: int): seq[byte] =
-  ## Zero-pad a chunk up to shard length. Reed-Solomon works on equal-length
-  ## inputs, and leopard reads `shardLen` bytes out of every non-empty entry
-  ## regardless of that seq's actual length.
+  ## Zero-pad a chunk up to shard length: leopard reads `shardLen` bytes out of
+  ## every non-empty entry regardless of that seq's actual length.
   var padded = newSeq[byte](shardLen)
   for i, b in chunk:
     padded[i] = b
   return padded
 
 func parityCountFor*(dataCount, scaledParityRate: int): int =
-  ## `ceil(parityRate * dataCount)`, capped so parity stays the minority class.
+  ## `ceil(parityRate * dataCount)`, capped so parity never outnumbers the data.
   ## `scaledParityRate` is the rate numerator over `ParityRateScale`.
   ##
-  ## Integer arithmetic is deliberate: `ceil(0.125 * 8)` in floating point can
-  ## come out as 2, because the product evaluates to 1.0000000000000002. Two
+  ## Integer arithmetic is deliberate: in floating point `ceil(0.125 * 8)` can
+  ## come out as 2, since the product evaluates to 1.0000000000000002, and two
   ## conforming implementations would then disagree on the parity count.
   ##
-  ## Capped at `dataCount`, which is both what the spec requires ("parity
-  ## segments never outnumbering the data ones") and leopard's own
-  ## `parity > buffers` rejection. Reed-Solomon recovers from any `dataCount`
-  ## segments of a set whichever class they are, so parity equal to the data
-  ## count is useful rather than wasteful.
+  ## The cap at `dataCount` is both what the spec requires ("parity segments
+  ## never outnumbering the data ones") and leopard's own `parity > buffers`
+  ## rejection. Reed-Solomon recovers from any `dataCount` segments of a set
+  ## whichever class they are, so parity equal to the data count is useful
+  ## rather than wasteful.
   if dataCount < 1 or scaledParityRate <= 0:
     return 0
   let raw = (dataCount * scaledParityRate + ParityRateScale - 1) div ParityRateScale

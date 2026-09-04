@@ -17,9 +17,8 @@
 ##
 ## Only `parity_segment_count` is `optional`: unset means the sender emitted no
 ## parity. Every other field has implicit presence -- proto3 leaves a default
-## value off the wire, so a receiver cannot tell "absent" from "zero" and must
-## read one as the other. What makes those fields meaningful is enforced after
-## decoding, by `isValid`, rather than by presence.
+## value off the wire, so "absent" and "zero" are indistinguishable, and what
+## makes those fields meaningful is enforced after decoding by `isValid`.
 
 {.push raises: [].}
 import results, protobuf_serialization
@@ -66,8 +65,8 @@ func init(T: type SegmentMessage, pb: SegmentMessagePB): T =
   ## Narrow the mirror's widened counts back to the spec's `uint32`.
   ##
   ## Clamp rather than convert: the narrowing would wrap, and a wrapped count can
-  ## land back inside the valid range. Clamping keeps it out of range so that
-  ## `isValid` rejects it.
+  ## land back inside the valid range, while clamping keeps it out of range for
+  ## `isValid` to reject.
   return T.init(
     originalPayloadHash = pb.originalPayloadHash,
     originalPayloadLength = pb.originalPayloadLength,
