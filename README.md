@@ -38,7 +38,8 @@ handler.cleanupSegments()
 ```
 
 Reception discards more than it delivers, and the return value describes only delivery.
-Everything else is reported through callbacks supplied at construction:
+Everything else is reported through callbacks supplied at construction. Each one is
+optional — omit it and that outcome goes unreported:
 
 ```nim
 let handler = SegmentationHandler.new(
@@ -57,15 +58,7 @@ let handler = SegmentationHandler.new(
 ).expect("valid config")
 ```
 
-All four are **required** — `new` fails on a nil callback. Reception discards far more
-than it delivers, and an expired, evicted or hash-failing set has no other channel, so an
-unwired `onSetDropped` loses payloads silently. Ignoring an outcome is fine, it just has
-to be an explicit no-op rather than an omission:
-
-```nim
-proc ignoreDropped(hash: seq[byte], reason: SegmentSetDropReason) {.gcsafe, raises: [].} =
-  discard
-```
+All four default to `nil`, and a nil callback is simply never called.
 
 The callbacks are `{.gcsafe.}`, so they may close over locals or a context object but not
 over mutable module-level globals. See [tools/roundtrip_demo.nim](tools/roundtrip_demo.nim)

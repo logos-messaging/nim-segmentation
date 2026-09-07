@@ -6,7 +6,8 @@
 ## payload hash and nothing else, while the caller knows the channel and sender.
 ##
 ## Callbacks are supplied to `SegmentationHandler.new` and are never reassigned,
-## so there is no window where half a handler is wired up.
+## so there is no window where half a handler is wired up. Each one defaults to
+## nil, which means that outcome is not reported at all.
 
 {.push raises: [].}
 import ./reassembled_payload
@@ -61,12 +62,12 @@ type SegmentProgressHandler* =
 type SegmentSetDroppedHandler* = proc(
   originalPayloadHash: seq[byte], reason: SegmentSetDropReason
 ) {.gcsafe, raises: [].}
-  ## Invoked once per abandoned set. Required: `SegmentationHandler.new` rejects
-  ## a nil callback.
+  ## Invoked once per abandoned set. Leaving it nil silently loses those
+  ## payloads: no other channel reports them.
 
 type SegmentDiscardedHandler* =
   proc(reason: SegmentDiscardReason) {.gcsafe, raises: [].}
   ## Invoked per rejected segment. Expect volume: duplicates are routine during
-  ## retransmission. Required: `SegmentationHandler.new` rejects a nil callback.
+  ## retransmission.
 
 {.pop.}

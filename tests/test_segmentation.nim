@@ -160,45 +160,44 @@ suite "configuration":
     check noSets.isErr()
     check noSets.error.contains("maxSegmentSets")
 
-suite "callbacks are mandatory":
-  test "a nil callback is rejected at construction":
-    # Ignoring an outcome must be a decision written as an explicit no-op, not an
-    # omission -- otherwise a consumer loses dropped payloads silently.
-    check SegmentationHandler
-      .new(
-        SegmentationConfig.init(), nil, ignoreDiscarded, ignorePayload, ignoreProgress
-      )
-      .isErr()
-    check SegmentationHandler
-      .new(SegmentationConfig.init(), ignoreDropped, nil, ignorePayload, ignoreProgress)
-      .isErr()
-    check SegmentationHandler
-      .new(
-        SegmentationConfig.init(), ignoreDropped, ignoreDiscarded, nil, ignoreProgress
-      )
-      .isErr()
-    check SegmentationHandler
-      .new(
-        SegmentationConfig.init(), ignoreDropped, ignoreDiscarded, ignorePayload, nil
-      )
-      .isErr()
+suite "callbacks are optional":
+  test "a handler can be built without any callback":
+    check SegmentationHandler.new(SegmentationConfig.init()).isOk()
 
-  test "the error names the missing callback":
-    let e = SegmentationHandler.new(
-      SegmentationConfig.init(), nil, ignoreDiscarded, ignorePayload, ignoreProgress
-    ).error
-    check e.contains("onSetDropped")
+  test "reception works with every callback left nil":
+    # The nil guards have to cover delivery, progress, discards and set drops
+    # alike -- any one of them missing would crash on the first such outcome.
+    let h = SegmentationHandler
+      .new(SegmentationConfig.init(segmentSizeBytes = 320))
+      .expect("valid config")
+    let payload = payloadOf(1000)
+    let segments = h.performSegmentation(payload).get()
 
-  test "explicit no-ops are accepted":
-    check SegmentationHandler
+    check h.handleIncomingSegment(@[byte 0xFF, 0xFF, 0xFF]).get().isNone()
+    let delivered = h.feed(segments)
+    check delivered.isSome()
+    check delivered.get().payload == payload
+
+    # Duplicates discard; a set left incomplete then expires on the next sweep.
+    check h.handleIncomingSegment(segments[0]).get().isNone()
+    check h.handleIncomingSegment(segments[0]).get().isNone()
+    h.cleanupSegments()
+
+  test "a single callback can be wired on its own":
+    let seen = new seq[(seq[byte], SegmentSetDropReason)]
+    let h = SegmentationHandler
       .new(
-        SegmentationConfig.init(),
-        ignoreDropped,
-        ignoreDiscarded,
-        ignorePayload,
-        ignoreProgress,
+        SegmentationConfig.init(segmentSizeBytes = 320, maxSegmentSets = 1),
+        onSetDropped = proc(hash: seq[byte], reason: SegmentSetDropReason) {.gcsafe.} =
+          seen[].add((hash, reason)),
       )
-      .isOk()
+      .expect("valid config")
+    let first = h.performSegmentation(payloadOf(1000)).get()
+    let second = h.performSegmentation(payloadOf(2000)).get()
+    check h.handleIncomingSegment(first[0]).get().isNone()
+    check h.handleIncomingSegment(second[0]).get().isNone()
+    check seen[].len == 1
+    check seen[][0][1] == SegmentSetDropReason.Evicted
 
 suite "segmentation without parity":
   test "a payload that fits one chunk is still wrapped":
