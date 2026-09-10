@@ -49,10 +49,10 @@ type SegmentationHandler* = ref object
 proc new*(
     T: type SegmentationHandler,
     config: SegmentationConfig,
-    onSetDropped: SegmentSetDroppedHandler,
-    onSegmentDiscarded: SegmentDiscardedHandler,
-    onPayloadReassembled: PayloadReassembledHandler,
-    onSegmentProgress: SegmentProgressHandler,
+    onSetDropped: SegmentSetDroppedHandler = nil,
+    onSegmentDiscarded: SegmentDiscardedHandler = nil,
+    onPayloadReassembled: PayloadReassembledHandler = nil,
+    onSegmentProgress: SegmentProgressHandler = nil,
 ): Result[T, string] =
   ## Validate `config` and derive the chunk size from it. Fails rather than
   ## clamping, so a misconfiguration surfaces at construction and not on the
@@ -63,11 +63,8 @@ proc new*(
   ## `onSegmentDiscarded` per rejected segment, and `onSegmentProgress` per
   ## stored segment, for reporting partial arrival of a large payload.
   ##
-  ## All four are required and must be non-nil: reception discards far more than
-  ## it delivers, and a set that expires, is evicted or fails its hash check has
-  ## no other channel, so an unwired `onSetDropped` would lose payloads silently.
-  ## Ignoring an outcome is fine, but it has to be a decision written as an
-  ## explicit no-op rather than an omission.
+  ## All four are optional and default to nil, in which case that outcome is not
+  ## reported.
   ##
   ## `onPayloadReassembled` carries the same payload the call returns; use one or
   ## the other, not both.
@@ -96,14 +93,6 @@ proc new*(
       "segmentation_handler.new: maxBufferedBytes below segmentSizeBytes: " &
         $config.maxBufferedBytes & " < " & $config.segmentSizeBytes
     )
-  if onSetDropped.isNil():
-    return err("segmentation_handler.new: onSetDropped must not be nil")
-  if onSegmentDiscarded.isNil():
-    return err("segmentation_handler.new: onSegmentDiscarded must not be nil")
-  if onPayloadReassembled.isNil():
-    return err("segmentation_handler.new: onPayloadReassembled must not be nil")
-  if onSegmentProgress.isNil():
-    return err("segmentation_handler.new: onSegmentProgress must not be nil")
   if config.maxSegmentSets < 1:
     return err(
       "segmentation_handler.new: maxSegmentSets not positive: " & $config.maxSegmentSets
@@ -145,14 +134,24 @@ func bufferedBytes*(self: SegmentationHandler): int =
   ## Segment payload bytes held across those sets, against `maxBufferedBytes`.
   return self.cache.bufferedBytes
 
-# `new` rejects nil callbacks, so these need no guard.
+# A nil callback means the consumer opted out of that outcome
 proc notifyDiscarded(self: SegmentationHandler, reason: SegmentDiscardReason) =
-  self.onSegmentDiscarded(reason)
+  if not self.onSegmentDiscarded.isNil():
+    self.onSegmentDiscarded(reason)
 
 proc notifySetDropped(
     self: SegmentationHandler, s: SegmentSet, reason: SegmentSetDropReason
 ) =
-  self.onSetDropped(s.originalPayloadHash, reason)
+  if not self.onSetDropped.isNil():
+    self.onSetDropped(s.originalPayloadHash, reason)
+
+proc notifyProgress(self: SegmentationHandler, hash: seq[byte], held, expected: int) =
+  if not self.onSegmentProgress.isNil():
+    self.onSegmentProgress(hash, held, expected)
+
+proc notifyReassembled(self: SegmentationHandler, payload: ReassembledPayload) =
+  if not self.onPayloadReassembled.isNil():
+    self.onPayloadReassembled(payload)
 
 proc performSegmentation*(
     self: SegmentationHandler, payload: seq[byte]
@@ -261,7 +260,7 @@ proc handleIncomingSegment*(
   if s.isNil():
     return ok(Opt.none(ReassembledPayload))
 
-  self.onSegmentProgress(s.originalPayloadHash, s.heldSegments(), int(s.dataCount))
+  self.notifyProgress(s.originalPayloadHash, s.heldSegments(), int(s.dataCount))
 
   if not s.isReconstructible():
     return ok(Opt.none(ReassembledPayload))
@@ -285,7 +284,7 @@ proc handleIncomingSegment*(
   let reassembled = ReassembledPayload.init(
     payload = payload, originalPayloadHash = m.originalPayloadHash
   )
-  self.onPayloadReassembled(reassembled)
+  self.notifyReassembled(reassembled)
   return ok(Opt.some(reassembled))
 
 proc cleanupSegments*(self: SegmentationHandler) =

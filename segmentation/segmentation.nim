@@ -57,10 +57,8 @@
 ## onSegmentDiscarded(reason)                  # Undecodable, Invalid, Oversized,
 ##                                             # Duplicate, CountMismatch, CacheFull
 ## ```
-## All four are required, and `new` fails on a nil one: reception discards far
-## more than it delivers, and an expired, evicted or hash-failing set has no
-## other channel, so an unwired `onSetDropped` would lose payloads silently.
-## Ignoring an outcome is fine, but it has to be written as an explicit no-op.
+## All four are optional and default to nil, in which case that outcome is not
+## reported.
 ##
 ## `onPayloadReassembled` fires immediately before the same payload is returned:
 ## they are one event reported twice, so act on the callback or on the returned

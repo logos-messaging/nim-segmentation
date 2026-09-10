@@ -34,8 +34,7 @@ func new*(
     onSetDropped: SegmentSetDroppedHandler = nil,
 ): T =
   ## `onSetDropped` fires for every set this cache abandons: expiry, eviction and
-  ## the both-classes-known bound. `SegmentationHandler.new` rejects a nil
-  ## callback, so a handler-owned cache always has one.
+  ## the both-classes-known bound. Nil means those drops go unreported.
   ##
   ## Two independent bounds, as the spec's Segment Caching section requires:
   ## `maxSets` caps how many payloads may be in flight, `maxBytes` what they may
